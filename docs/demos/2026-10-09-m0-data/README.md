@@ -1,6 +1,6 @@
 # M0 demo: QASPER download and loader
 
-Run on a fresh clone of commit `9dd5707`, against the real Allen AI S3 release. Full output:
+Run on a fresh clone of commit `305d793` (recorded as `9dd5707` in the transcript; same files, renamed when the history was rebased onto an empty initial commit), against the real Allen AI S3 release. Full output:
 [`transcript.txt`](transcript.txt).
 
 ## Reproduce
