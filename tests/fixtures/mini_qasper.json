@@ -4,7 +4,7 @@
     "abstract": "We study tiny things.",
     "full_text": [
       {"section_name": "Introduction", "paragraphs": ["We introduce a  tiny model.", "", "It is small."]},
-      {"section_name": "Experiments ::: Datasets", "paragraphs": ["We use the Foo dataset."]}
+      {"section_name": "Experiments ::: Datasets", "paragraphs": ["We use the Foo dataset.", "Datasets are listed in Table 2.", "It is small."]}
     ],
     "figures_and_tables": [],
     "qas": [
@@ -21,7 +21,7 @@
       {"question_id": "q-boolean", "question": "Is the model small?",
        "answers": [
          {"annotation_id": "a4", "worker_id": "w1", "answer": {"unanswerable": false, "extractive_spans": [], "yes_no": false, "free_form_answer": "",
-          "evidence": ["is small"], "highlighted_evidence": []}}]},
+          "evidence": ["It is small."], "highlighted_evidence": []}}]},
       {"question_id": "q-figure", "question": "What is the accuracy?",
        "answers": [
          {"annotation_id": "a5", "worker_id": "w1", "answer": {"unanswerable": false, "extractive_spans": ["90%"], "yes_no": null, "free_form_answer": "",

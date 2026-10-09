@@ -13,9 +13,9 @@ def questions() -> dict[str, Question]:
     return {q.id: q for paper in papers for q in paper.questions}
 
 
-def test_empty_paragraphs_are_dropped_and_ids_stay_positional():
+def test_empty_and_repeated_paragraphs_are_dropped_and_ids_stay_positional():
     (paper,) = load_split(FIXTURE)
-    assert [p.id for p in paper.paragraphs] == ["s0p0", "s0p2", "s1p0"]
+    assert [p.id for p in paper.paragraphs] == ["s0p0", "s0p2", "s1p0", "s1p1"]
     assert paper.paragraphs[2].section == "Experiments ::: Datasets"
 
 
@@ -31,11 +31,11 @@ def test_evidence_maps_to_paragraphs_despite_whitespace_differences(questions):
     assert questions["q-abstractive"].answers[0].evidence_ids == ("s0p0",)
 
 
-def test_partial_paragraph_evidence_maps_to_the_paragraph_containing_it(questions):
+def test_evidence_matching_a_repeated_paragraph_maps_to_its_first_copy(questions):
     assert questions["q-boolean"].answers[0].evidence_ids == ("s0p2",)
 
 
-def test_heading_evidence_is_kept_separately_not_dropped(questions):
+def test_heading_evidence_is_kept_separately_even_when_a_paragraph_contains_it(questions):
     answer = questions["q-extractive"].answers[0]
     assert answer.evidence_ids == ("s1p0",)
     assert answer.other_evidence == ("Datasets",)

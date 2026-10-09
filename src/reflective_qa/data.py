@@ -37,7 +37,7 @@ class Answer:
     evidence_ids: tuple[str, ...]
     """Ids of the paragraphs the annotator selected as evidence."""
     other_evidence: tuple[str, ...]
-    """Evidence that is not part of any paragraph, such as section headings."""
+    """Evidence that matches no paragraph. In QASPER v0.3 these are all section headings."""
     uses_figure_or_table: bool
 
 
@@ -78,13 +78,16 @@ def _normalize(text: str) -> str:
 
 
 def _parse_paper(paper_id: str, raw: dict) -> Paper:
-    paragraphs = tuple(
-        Paragraph(id=f"s{s}p{p}", section=section["section_name"] or "", text=text)
-        for s, section in enumerate(raw["full_text"])
-        for p, text in enumerate(section["paragraphs"])
-        if text.strip()
-    )
-    ids_by_text = {_normalize(paragraph.text): paragraph.id for paragraph in paragraphs}
+    paragraphs: list[Paragraph] = []
+    ids_by_text: dict[str, str] = {}
+    for s, section in enumerate(raw["full_text"]):
+        for p, text in enumerate(section["paragraphs"]):
+            key = _normalize(text)
+            # Skip empty and repeated paragraphs, so every evidence text has exactly one id to retrieve.
+            if not key or key in ids_by_text:
+                continue
+            ids_by_text[key] = f"s{s}p{p}"
+            paragraphs.append(Paragraph(id=ids_by_text[key], section=section["section_name"] or "", text=text))
     questions = tuple(
         Question(
             id=qa["question_id"],
@@ -98,7 +101,7 @@ def _parse_paper(paper_id: str, raw: dict) -> Paper:
         id=paper_id,
         title=raw["title"],
         abstract=raw["abstract"],
-        paragraphs=paragraphs,
+        paragraphs=tuple(paragraphs),
         questions=questions,
     )
 
@@ -111,7 +114,7 @@ def _parse_answer(raw: dict, ids_by_text: dict[str, str]) -> Answer:
     for evidence in raw["evidence"]:
         if FIGURE_OR_TABLE_MARKER in evidence:
             uses_figure_or_table = True
-        elif (paragraph_id := _find_paragraph(evidence, ids_by_text)) is not None:
+        elif (paragraph_id := ids_by_text.get(_normalize(evidence))) is not None:
             evidence_ids.append(paragraph_id)
         else:
             other.append(evidence)
@@ -122,15 +125,6 @@ def _parse_answer(raw: dict, ids_by_text: dict[str, str]) -> Answer:
         other_evidence=tuple(other),
         uses_figure_or_table=uses_figure_or_table,
     )
-
-
-def _find_paragraph(evidence: str, ids_by_text: dict[str, str]) -> str | None:
-    """Id of the paragraph that is, or uniquely contains, this evidence string."""
-    evidence = _normalize(evidence)
-    if evidence in ids_by_text:
-        return ids_by_text[evidence]
-    containing = [paragraph_id for text, paragraph_id in ids_by_text.items() if evidence in text]
-    return containing[0] if len(containing) == 1 else None
 
 
 def _answer_text_and_type(raw: dict) -> tuple[str, AnswerType]:

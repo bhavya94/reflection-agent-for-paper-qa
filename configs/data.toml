@@ -1,6 +1,6 @@
 # QASPER v0.3, the release the Hugging Face loader points to (Dasigi et al., 2021; CC BY 4.0).
-raw_dir = "data/raw"
-dev_file = "qasper-dev-v0.3.json"
+# Relative to this file.
+raw_dir = "../data/raw"
 
 [[archives]]
 url = "https://qasper-dataset.s3.us-west-2.amazonaws.com/qasper-train-dev-v0.3.tgz"
