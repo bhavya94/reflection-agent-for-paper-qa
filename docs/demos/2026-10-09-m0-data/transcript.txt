@@ -1,0 +1,83 @@
+# M0 demo, fresh clone at commit 9dd5707, 2026-10-09T22:34Z
+
+$ uv sync -q
+[exit 0]
+
+$ ls data
+ls: data: No such file or directory
+[exit 1]
+
+## 1. Download from S3 with checksum verification
+$ uv run python -m reflective_qa.download
+QASPER files in <clone>/data/raw
+[exit 0]
+
+$ ls -l data/raw
+total 84752
+-rw-r--r--@ 1 user  wheel      6345 Mar 25  2022 qasper_evaluator.py
+-rw-r--r--@ 1 user  wheel  11398686 Mar 24  2022 qasper-dev-v0.3.json
+-rw-r--r--@ 1 user  wheel  31969387 Mar 25  2022 qasper-train-v0.3.json
+-rw-r--r--@ 1 user  wheel       916 Mar 25  2022 README-test.md
+-rw-r--r--@ 1 user  wheel      4099 Mar 25  2022 README.md
+[exit 0]
+
+## 2. The test split is not on disk
+$ find data -name *test*.json
+[exit 0]
+
+## 3. Second run skips files already present (no network)
+$ uv run python -m reflective_qa.download
+QASPER files in <clone>/data/raw
+[exit 0]
+
+## 4. Failure case: a tampered checksum is rejected and nothing is written
+$ grep -m1 ^sha256 tampered/configs/data.toml
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+[exit 0]
+
+$ uv run python -c from pathlib import Path; from reflective_qa.download import download; download(Path('tampered/configs/data.toml'))
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "<clone>/src/reflective_qa/download.py", line 30, in download
+    raise ValueError(f"Checksum mismatch for {archive['url']}: got {digest}")
+ValueError: Checksum mismatch for https://qasper-dataset.s3.us-west-2.amazonaws.com/qasper-train-dev-v0.3.tgz: got a28fdf966db827bcee3d873107d6b6669864fb7ca8fbf73a192f5e39191bdb5a
+[exit 1]
+
+$ find tampered/raw -type f
+[exit 0]
+
+## 5. Dev split summary
+$ uv run python -m reflective_qa.stats data/raw/qasper-dev-v0.3.json
+papers                           281
+questions                        1005
+text_only_questions              841
+text_only_with_2plus_answers     616
+answer_types                     {'extractive': 888, 'boolean': 173, 'abstractive': 262, 'none': 143}
+evidence_paragraphs_mapped       2154
+evidence_not_a_paragraph         124
+paragraphs_per_paper_median      43
+paragraph_chars_median           415
+[exit 0]
+
+## 6. Full test suite, including evaluator parity on real dev data
+$ uv run pytest -v
+============================= test session starts ==============================
+platform darwin -- Python 3.12.15, pytest-9.1.1, pluggy-1.6.0 -- <clone>/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: <clone>
+configfile: pyproject.toml
+collecting ... collected 9 items
+
+tests/test_data.py::test_empty_and_repeated_paragraphs_are_dropped_and_ids_stay_positional PASSED [ 11%]
+tests/test_data.py::test_answer_text_and_type_match_the_official_evaluator PASSED [ 22%]
+tests/test_data.py::test_evidence_maps_to_paragraphs_despite_whitespace_differences PASSED [ 33%]
+tests/test_data.py::test_evidence_matching_a_repeated_paragraph_maps_to_its_first_copy PASSED [ 44%]
+tests/test_data.py::test_heading_evidence_is_kept_separately_even_when_a_paragraph_contains_it PASSED [ 55%]
+tests/test_data.py::test_text_only_excludes_questions_that_need_a_figure_or_table PASSED [ 66%]
+tests/test_download.py::test_extracts_only_listed_files PASSED           [ 77%]
+tests/test_download.py::test_rejects_an_archive_whose_checksum_does_not_match PASSED [ 88%]
+tests/test_evaluator_parity.py::test_answer_text_and_type_match_the_official_evaluator_on_dev PASSED [100%]
+
+============================== 9 passed in 0.28s ===============================
+[exit 0]
+
