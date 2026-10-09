@@ -1,0 +1,31 @@
+{
+  "2101.00001": {
+    "title": "A Tiny Paper",
+    "abstract": "We study tiny things.",
+    "full_text": [
+      {"section_name": "Introduction", "paragraphs": ["We introduce a  tiny model.", "", "It is small."]},
+      {"section_name": "Experiments ::: Datasets", "paragraphs": ["We use the Foo dataset."]}
+    ],
+    "figures_and_tables": [],
+    "qas": [
+      {"question_id": "q-extractive", "question": "What dataset is used?",
+       "answers": [
+         {"annotation_id": "a1", "worker_id": "w1", "answer": {"unanswerable": false, "extractive_spans": ["Foo", "Bar"], "yes_no": null, "free_form_answer": "",
+          "evidence": ["We use the Foo dataset.", "Datasets"], "highlighted_evidence": []}},
+         {"annotation_id": "a2", "worker_id": "w2", "answer": {"unanswerable": true, "extractive_spans": [], "yes_no": null, "free_form_answer": "",
+          "evidence": [], "highlighted_evidence": []}}]},
+      {"question_id": "q-abstractive", "question": "What do they introduce?",
+       "answers": [
+         {"annotation_id": "a3", "worker_id": "w1", "answer": {"unanswerable": false, "extractive_spans": [], "yes_no": null, "free_form_answer": "a tiny model",
+          "evidence": ["We introduce a tiny\nmodel."], "highlighted_evidence": []}}]},
+      {"question_id": "q-boolean", "question": "Is the model small?",
+       "answers": [
+         {"annotation_id": "a4", "worker_id": "w1", "answer": {"unanswerable": false, "extractive_spans": [], "yes_no": false, "free_form_answer": "",
+          "evidence": ["It is small."], "highlighted_evidence": []}}]},
+      {"question_id": "q-figure", "question": "What is the accuracy?",
+       "answers": [
+         {"annotation_id": "a5", "worker_id": "w1", "answer": {"unanswerable": false, "extractive_spans": ["90%"], "yes_no": null, "free_form_answer": "",
+          "evidence": ["FLOAT SELECTED: Table 1: Results."], "highlighted_evidence": []}}]}
+    ]
+  }
+}

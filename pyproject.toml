@@ -1,0 +1,17 @@
+[project]
+name = "reflective-qa"
+version = "0.1.0"
+description = "A reflection agent for grounded QA over research papers (QASPER), measured against one-shot answering."
+readme = "README.md"
+authors = [{ name = "Bhavya Sharma" }]
+requires-python = ">=3.12"
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.12.23,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
