@@ -37,7 +37,7 @@ class Answer:
     evidence_ids: tuple[str, ...]
     """Ids of the paragraphs the annotator selected as evidence."""
     other_evidence: tuple[str, ...]
-    """Evidence that is not a paragraph: section headings, or partial paragraphs."""
+    """Evidence that is not part of any paragraph, such as section headings."""
     uses_figure_or_table: bool
 
 
@@ -111,7 +111,7 @@ def _parse_answer(raw: dict, ids_by_text: dict[str, str]) -> Answer:
     for evidence in raw["evidence"]:
         if FIGURE_OR_TABLE_MARKER in evidence:
             uses_figure_or_table = True
-        elif (paragraph_id := ids_by_text.get(_normalize(evidence))) is not None:
+        elif (paragraph_id := _find_paragraph(evidence, ids_by_text)) is not None:
             evidence_ids.append(paragraph_id)
         else:
             other.append(evidence)
@@ -122,6 +122,15 @@ def _parse_answer(raw: dict, ids_by_text: dict[str, str]) -> Answer:
         other_evidence=tuple(other),
         uses_figure_or_table=uses_figure_or_table,
     )
+
+
+def _find_paragraph(evidence: str, ids_by_text: dict[str, str]) -> str | None:
+    """Id of the paragraph that is, or uniquely contains, this evidence string."""
+    evidence = _normalize(evidence)
+    if evidence in ids_by_text:
+        return ids_by_text[evidence]
+    containing = [paragraph_id for text, paragraph_id in ids_by_text.items() if evidence in text]
+    return containing[0] if len(containing) == 1 else None
 
 
 def _answer_text_and_type(raw: dict) -> tuple[str, AnswerType]:

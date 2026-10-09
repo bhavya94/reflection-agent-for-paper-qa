@@ -31,6 +31,10 @@ def test_evidence_maps_to_paragraphs_despite_whitespace_differences(questions):
     assert questions["q-abstractive"].answers[0].evidence_ids == ("s0p0",)
 
 
+def test_partial_paragraph_evidence_maps_to_the_paragraph_containing_it(questions):
+    assert questions["q-boolean"].answers[0].evidence_ids == ("s0p2",)
+
+
 def test_heading_evidence_is_kept_separately_not_dropped(questions):
     answer = questions["q-extractive"].answers[0]
     assert answer.evidence_ids == ("s1p0",)

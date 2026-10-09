@@ -21,7 +21,7 @@
       {"question_id": "q-boolean", "question": "Is the model small?",
        "answers": [
          {"annotation_id": "a4", "worker_id": "w1", "answer": {"unanswerable": false, "extractive_spans": [], "yes_no": false, "free_form_answer": "",
-          "evidence": ["It is small."], "highlighted_evidence": []}}]},
+          "evidence": ["is small"], "highlighted_evidence": []}}]},
       {"question_id": "q-figure", "question": "What is the accuracy?",
        "answers": [
          {"annotation_id": "a5", "worker_id": "w1", "answer": {"unanswerable": false, "extractive_spans": ["90%"], "yes_no": null, "free_form_answer": "",
