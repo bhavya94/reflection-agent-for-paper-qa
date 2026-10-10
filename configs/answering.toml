@@ -16,3 +16,17 @@ effort = "medium"
 model = "claude-haiku-5-5"
 k = 5
 effort = "medium"
+
+[costs]
+# USD per million tokens, standard first-party rates as of 2026-10-06. The Batch API halves them.
+batch_discount = 0.5
+# Output tokens per answer (thinking included), used until a run has measured its own.
+assumed_output_tokens = 500
+
+[costs.prices.claude-sonnet-5-5]
+input = 2.0
+output = 10.0
+
+[costs.prices.claude-haiku-5-5]
+input = 0.10
+output = 0.50
