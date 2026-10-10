@@ -5,15 +5,16 @@ import Stemmer
 
 from reflective_qa.data import Paper, Paragraph
 
-_STEMMER = Stemmer.Stemmer("english")
-
 
 def _tokenize(texts: list[str]) -> list[list[str]]:
-    return bm25s.tokenize(texts, stopwords="en", stemmer=_STEMMER, return_ids=False, show_progress=False)
+    # A new stemmer per call: PyStemmer instances must not be shared across threads.
+    return bm25s.tokenize(texts, stopwords="en", stemmer=Stemmer.Stemmer("english"), return_ids=False,
+                          show_progress=False)
 
 
-def _indexed_text(paragraph: Paragraph) -> str:
-    """Section titles carry topic words a paragraph often doesn't repeat."""
+def passage_text(paragraph: Paragraph) -> str:
+    """A paragraph as it is indexed and shown to the answer model: section titles first, because they
+    carry topic words the paragraph often doesn't repeat."""
     return f"{paragraph.section.replace(' ::: ', '. ')}. {paragraph.text}"
 
 
@@ -21,10 +22,11 @@ class PaperRetriever:
     def __init__(self, paper: Paper):
         self.paragraphs = paper.paragraphs
         self._bm25 = bm25s.BM25()
-        self._bm25.index(_tokenize([_indexed_text(p) for p in self.paragraphs]), show_progress=False)
+        self._bm25.index(_tokenize([passage_text(p) for p in self.paragraphs]), show_progress=False)
 
     def retrieve(self, question: str, k: int) -> list[Paragraph]:
-        """Top-k paragraphs by BM25 score; every paragraph if the paper has k or fewer."""
+        """Top-k paragraphs by BM25 score; every paragraph if the paper has k or fewer.
+        Paragraphs with equal scores (often all zero near the bottom of the top-k) come in arbitrary order."""
         k = min(k, len(self.paragraphs))
         if k == 0:
             return []
