@@ -5,7 +5,10 @@ description = "A reflection agent for grounded QA over research papers (QASPER),
 readme = "README.md"
 authors = [{ name = "Bhavya Sharma" }]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "bm25s>=0.3.13",
+    "pystemmer>=3.1.0",
+]
 
 [build-system]
 requires = ["uv_build>=0.12.23,<0.13.0"]

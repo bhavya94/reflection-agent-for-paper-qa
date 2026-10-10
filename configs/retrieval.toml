@@ -1,0 +1,4 @@
+# Paragraphs passed to the answer model. Chosen from evidence recall@k; see the M1 retrieval explainer.
+k = 20
+# Cut-offs reported by `python -m reflective_qa.retrieval_eval`.
+report_ks = [1, 3, 5, 10, 20]
