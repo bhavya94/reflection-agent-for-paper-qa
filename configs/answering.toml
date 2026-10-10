@@ -1,0 +1,18 @@
+# Writer runs for the M1 baselines. k paragraphs come from BM25 (src/reflective_qa/retrieval.py); k = 0 is closed-book.
+# Effort is set explicitly because the defaults differ: high on Sonnet 5.5, medium on Haiku 5.5.
+max_tokens = 4000  # thinking plus a short JSON answer
+
+[runs.sonnet-k20]
+model = "claude-sonnet-5-5"
+k = 20
+effort = "medium"
+
+[runs.sonnet-closed-book]
+model = "claude-sonnet-5-5"
+k = 0
+effort = "medium"
+
+[runs.haiku-k5]
+model = "claude-haiku-5-5"
+k = 5
+effort = "medium"
