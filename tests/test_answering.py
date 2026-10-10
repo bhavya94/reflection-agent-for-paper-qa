@@ -10,7 +10,8 @@ RUN = RunConfig(name="test", model="claude-haiku-5-5", k=2, effort="low", max_to
 
 def _reply(text: str, stop_reason: str = "end_turn"):
     return SimpleNamespace(content=[SimpleNamespace(type="thinking", thinking=""), SimpleNamespace(type="text", text=text)],
-                           stop_reason=stop_reason, usage=SimpleNamespace(input_tokens=1200, output_tokens=80))
+                           model="claude-haiku-5-5", stop_reason=stop_reason,
+                           usage=SimpleNamespace(input_tokens=1200, output_tokens=80))
 
 
 def test_request_labels_each_passage_with_its_id_and_ends_with_the_question():
@@ -24,15 +25,15 @@ def test_request_labels_each_passage_with_its_id_and_ends_with_the_question():
     assert request["model"] == "claude-haiku-5-5" and request["output_config"]["effort"] == "low"
 
 
-def test_closed_book_request_has_no_passages():
+def test_closed_book_request_has_no_passages_and_asks_for_a_best_guess():
     (paper,) = load_split(FIXTURE)
     prompt = build_request(RUN, paper, paper.questions[0], [])["messages"][0]["content"]
-    assert "No passages are given" in prompt and "[s" not in prompt
+    assert "No passages are given. Give your best guess" in prompt and "[s" not in prompt
 
 
 def test_reply_parses_to_answer_and_citations_as_written():
     answer = parse_message("q1", _reply('{"answer": "Foo", "evidence": ["s1p0", "s9p9"]}'))
-    assert answer == Answer("q1", "Foo", ("s1p0", "s9p9"), "ok", 1200, 80)
+    assert answer == Answer("q1", "claude-haiku-5-5", "Foo", ("s1p0", "s9p9"), "ok", 1200, 80)
 
 
 def test_refusal_truncation_and_bad_json_give_an_empty_answer_with_the_reason():

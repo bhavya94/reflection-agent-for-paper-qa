@@ -12,10 +12,11 @@ from reflective_qa.retrieval import passage_text
 CONFIG = Path(__file__).resolve().parents[2] / "configs" / "answering.toml"
 
 SYSTEM = """You answer questions about one scientific paper.
-- When passages are given, use only them. Each passage starts with its ID in brackets, for example [s3p0].
 - Keep the answer as short as possible. When a phrase in the passages answers the question, copy it.
 - For a yes/no question, answer "Yes" or "No".
-- If you cannot answer, answer exactly "Unanswerable".
+- When passages are given, use only them. Each passage starts with its ID in brackets, for example [s3p0].
+  If they do not contain the answer, answer exactly "Unanswerable".
+- When no passages are given, give your best guess from what you know about the paper.
 - In "evidence", list the IDs of the passages that support the answer. List none if no passages are given or the
   answer is "Unanswerable"."""
 
@@ -39,6 +40,8 @@ class RunConfig:
 @dataclass(frozen=True)
 class Answer:
     question_id: str
+    model: str
+    """The model that produced the reply, as the API reports it."""
     answer: str
     evidence_ids: tuple[str, ...]
     status: str
@@ -57,7 +60,7 @@ def build_request(run: RunConfig, paper: Paper, question: Question, passages: li
     if passages:
         context = "Passages:\n" + "\n\n".join(f"[{p.id}] {passage_text(p)}" for p in passages)
     else:
-        context = "No passages are given. Answer from what you know about this paper."
+        context = "No passages are given. Give your best guess from what you know about this paper."
     return {
         "model": run.model,
         "max_tokens": run.max_tokens,
@@ -71,10 +74,10 @@ def parse_message(question_id: str, message: Any) -> Answer:
     """Citations are kept as the model wrote them; scoring treats an ID that wasn't retrieved as a wrong citation."""
     usage = (message.usage.input_tokens, message.usage.output_tokens)
     if message.stop_reason in ("refusal", "max_tokens"):
-        return Answer(question_id, "", (), message.stop_reason, *usage)
+        return Answer(question_id, message.model, "", (), message.stop_reason, *usage)
     text = next((block.text for block in message.content if block.type == "text"), "")
     try:
         reply = json.loads(text)
-        return Answer(question_id, reply["answer"], tuple(reply["evidence"]), "ok", *usage)
+        return Answer(question_id, message.model, reply["answer"], tuple(reply["evidence"]), "ok", *usage)
     except (json.JSONDecodeError, KeyError, TypeError):
-        return Answer(question_id, "", (), "invalid_json", *usage)
+        return Answer(question_id, message.model, "", (), "invalid_json", *usage)

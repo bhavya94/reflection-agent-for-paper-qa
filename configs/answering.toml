@@ -1,6 +1,6 @@
 # Writer runs for the M1 baselines. k paragraphs come from BM25 (src/reflective_qa/retrieval.py); k = 0 is closed-book.
 # Effort is set explicitly because the defaults differ: high on Sonnet 5.5, medium on Haiku 5.5.
-max_tokens = 4000  # thinking plus a short JSON answer
+max_tokens = 16000  # thinking counts toward it; billing is per generated token, so headroom is free
 
 [runs.sonnet-k20]
 model = "claude-sonnet-5-5"
