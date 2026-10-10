@@ -27,5 +27,6 @@ uv sync
 uv run python -m reflective_qa.download                                # QASPER train/dev + official evaluator, checksum-verified
 uv run python -m reflective_qa.stats data/raw/qasper-dev-v0.3.json     # dev split summary
 uv run python -m reflective_qa.retrieval_eval data/raw/qasper-dev-v0.3.json   # BM25 evidence recall@k
+uv run python -m reflective_qa.scoring data/raw/qasper-dev-v0.3.json predictions.jsonl   # answer- and evidence-F1
 uv run pytest
 ```
