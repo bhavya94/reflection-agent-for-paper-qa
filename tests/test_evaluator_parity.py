@@ -37,13 +37,14 @@ def test_answer_f1_matches_the_official_evaluator_on_dev():
     questions = text_only_questions(papers)
     # A mix of exact, partial, wrong, unanswerable and missing predictions; every 7th question has none.
     styles = [lambda q: q.answers[0].text, lambda q: q.answers[-1].text.split()[0], lambda q: "the proposed model",
-              lambda q: "Unanswerable", lambda q: "Yes"]
+              lambda q: "Unanswerable", lambda q: "Yes", lambda q: "No", lambda q: "", lambda q: " unanswerable. ",
+              lambda q: q.answers[-1].text.upper() + "!!"]
     predictions = {q.id: Prediction(styles[i % len(styles)](q), ()) for i, q in enumerate(questions) if i % 7}
     gold = evaluator.get_answers_and_evidence(json.loads(DEV.read_text()), text_evidence_only=True)
     official = evaluator.evaluate({q.id: gold[q.id] for q in questions},
                                   {qid: {"answer": p.answer, "evidence": []} for qid, p in predictions.items()})
     ours = score(papers, predictions)
     assert abs(ours["answer_f1"] - official["Answer F1"]) < 1e-12
-    official_by_type = {t: v for t, v in official["Answer F1 by type"].items() if v}
-    assert ours["answer_f1_by_type"] == pytest.approx(official_by_type, abs=1e-12)
+    assert set(ours["answer_f1_by_type"]) == set(official["Answer F1 by type"])  # all four types present
+    assert ours["answer_f1_by_type"] == pytest.approx(official["Answer F1 by type"], abs=1e-12)
     assert ours["missing"] == official["Missing predictions"]
