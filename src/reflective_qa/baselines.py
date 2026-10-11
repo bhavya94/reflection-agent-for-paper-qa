@@ -23,6 +23,7 @@ from reflective_qa.answering import (ANSWER_SCHEMA, CONFIG, SYSTEM, Answer, RunC
                                      parse_message)
 from reflective_qa.data import Paper, Question, load_split, text_only_questions
 from reflective_qa.retrieval import PaperRetriever
+from reflective_qa.scoring import load_predictions, score
 
 RUNS_DIR = Path(__file__).resolve().parents[2] / "data" / "runs"
 
@@ -132,6 +133,15 @@ def estimate(client: Any, run: RunConfig, requests: dict[str, dict], costs: Cost
             "dollars": costs.dollars(run.model, input_mean * len(ids), output * len(ids))}
 
 
+def report(run: RunConfig, requests: dict[str, dict], papers: list[Paper], out_dir: Path = RUNS_DIR) -> dict:
+    """Scores a run on its own question sample, so questions outside the sample don't count as zeros."""
+    answers_path = run_paths(run, out_dir)[0]
+    rows = read_answers(answers_path)
+    result = score(papers, load_predictions(answers_path) if rows else {}, set(requests))
+    return result | {"run": run.name, "file": answers_path.name, "cost": sum(r["cost"] for r in rows),
+                     "output_tokens": statistics.mean(r["output_tokens"] for r in rows) if rows else 0}
+
+
 def total_spent(out_dir: Path = RUNS_DIR) -> float:
     return sum(row["cost"] for path in out_dir.glob("*.jsonl") for row in read_answers(path))
 
@@ -140,7 +150,7 @@ def main() -> None:
     import anthropic
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["estimate", "run"])
+    parser.add_argument("command", choices=["estimate", "run", "report"])
     parser.add_argument("runs", nargs="*", help="run names from configs/answering.toml; default: all")
     parser.add_argument("--dev", type=Path, default=RUNS_DIR.parent / "raw" / "qasper-dev-v0.3.json")
     parser.add_argument("--questions", type=int, help="size of the seeded question sample; default: the config's")
@@ -148,10 +158,18 @@ def main() -> None:
     args = parser.parse_args()
     config = tomllib.loads(CONFIG.read_text())["sample"]
     n = args.questions or config["questions"]
-    client, papers, costs, runs = anthropic.Anthropic(), load_split(args.dev), load_costs(), load_runs()
+    papers, costs, runs = load_split(args.dev), load_costs(), load_runs()
+    client = anthropic.Anthropic() if args.command != "report" else None
     for name in args.runs or runs:
         run = runs[name]
         requests = build_requests(run, papers, n, config["seed"])
+        if args.command == "report":
+            r = report(run, requests, papers)
+            by_type = "  ".join(f"{t} {f1:.3f}" for t, f1 in r["answer_f1_by_type"].items())
+            print(f"{r['run']:20} {r['questions'] - r['missing']}/{r['questions']} answered  answer-F1 {r['answer_f1']:.3f}  "
+                  f"evidence-F1 {r['evidence_f1']:.3f}  unanswerable {r['predicted_unanswerable']:.1%}  "
+                  f"{r['output_tokens']:.0f} output tokens  ${r['cost']:.2f}\n{'':22}{by_type}")
+            continue
         answers_path, batch_path = run_paths(run, RUNS_DIR)
         done = {row["question_id"] for row in read_answers(answers_path)}
         pending = {qid: params for qid, params in requests.items() if qid not in done}
