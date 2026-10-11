@@ -1,19 +1,23 @@
 """One round of reflection on the M1 drafts: code checks and an optional critic flag problems, and the writer revises
 the flagged drafts once. Each setup's files are named with a fingerprint of everything that shapes its requests."""
 
+import argparse
 import hashlib
 import json
+import statistics
 import tomllib
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
-from reflective_qa.answering import RunConfig, build_request, load_runs
-from reflective_qa.baselines import RUNS_DIR, fingerprint as run_fingerprint, read_answers, run_paths, sample_questions
+from reflective_qa.answering import CONFIG as ANSWERING, RunConfig, build_request, load_runs, parse_message
+from reflective_qa.baselines import (RUNS_DIR, Costs, count_input_tokens, fingerprint as run_fingerprint, load_costs,
+                                     read_answers, run_paths, sample_questions, submit_and_collect)
 from reflective_qa.checks import CONFIG, Finding, load_max_words, run_checks
-from reflective_qa.critic import CriticConfig, build_critic_request
-from reflective_qa.data import Paper, Paragraph, Question, text_only_questions
+from reflective_qa.critic import CriticConfig, build_critic_request, parse_critique
+from reflective_qa.data import Paper, Paragraph, Question, load_split, text_only_questions
 from reflective_qa.retrieval import PaperRetriever
+from reflective_qa.scoring import Prediction, answer_f1, score
 
 # The answer rules are repeated because the 20-question pilot showed revisions drifting long and hedged
 # ("Yes, partly: ..."), which the writer's system prompt alone did not prevent.
@@ -127,3 +131,112 @@ def revise_request(writer: RunConfig, context: Context, found: list[Finding]) ->
     feedback = "\n".join(f"- {f.check}: {f.detail}" for f in found)
     content = f"{request['messages'][0]['content']}\n\nYour draft:\n{draft}\n\n{REVISE_INSTRUCTION}\n{feedback}"
     return request | {"messages": [{"role": "user", "content": content}]}
+
+
+def critique_record(setup: Setup, costs: Costs) -> Callable[[str, Any], dict]:
+    def record(qid: str, message: Any) -> dict:
+        c = parse_critique(qid, message)
+        return {"question_id": qid, "verdict": c.verdict, "problems": [asdict(f) for f in c.problems], "status": c.status,
+                "model": c.model, "cost": costs.dollars(setup.critic.model, c.input_tokens, c.output_tokens)}
+    return record
+
+
+def revision_record(writer: RunConfig, costs: Costs) -> Callable[[str, Any], dict]:
+    def record(qid: str, message: Any) -> dict:
+        a = parse_message(qid, message)
+        return {"question_id": qid, "predicted_answer": a.answer, "predicted_evidence": list(a.evidence_ids),
+                "status": a.status, "model": a.model, "output_tokens": a.output_tokens,
+                "cost": costs.dollars(writer.model, a.input_tokens, a.output_tokens)}
+    return record
+
+
+def revise_requests(setup: Setup, writer: RunConfig, contexts: dict[str, Context], critiques: dict[str, dict]) -> dict[str, dict]:
+    """Only drafts with something to fix are revised."""
+    return {qid: revise_request(writer, c, found) for qid, c in contexts.items()
+            if (found := problems(setup, c, critiques.get(qid)))}
+
+
+def final_answers(contexts: dict[str, Context], critiques: dict[str, dict], revisions: dict[str, dict]) -> dict[str, dict]:
+    """The revision where one succeeded, else the draft; with the cost of reflecting, not of the draft."""
+    final = {}
+    for qid, c in contexts.items():
+        revised = revisions.get(qid)
+        use = revised if revised and revised["status"] == "ok" else c.draft
+        cost = (critiques.get(qid) or {}).get("cost", 0.0) + (revised or {}).get("cost", 0.0)
+        final[qid] = {"question_id": qid, "predicted_answer": use["predicted_answer"],
+                      "predicted_evidence": use["predicted_evidence"], "revised": use is revised, "cost": cost}
+    return final
+
+
+def report(papers: list[Paper], contexts: dict[str, Context], final: dict[str, dict]) -> dict:
+    """The setup's final answers scored like M1, plus how reflection changed answers question by question."""
+    to_prediction = lambda row: Prediction(row["predicted_answer"], tuple(row["predicted_evidence"]))
+    ids = set(contexts)
+    result = score(papers, {qid: to_prediction(row) for qid, row in final.items()}, ids)
+    drafts = score(papers, {qid: to_prediction(c.draft) for qid, c in contexts.items()}, ids)
+    deltas = [answer_f1(c.question, final[qid]["predicted_answer"])[0] - answer_f1(c.question, c.draft["predicted_answer"])[0]
+              for qid, c in contexts.items() if final[qid]["revised"]]
+    return result | {"draft_answer_f1": drafts["answer_f1"], "revised": len(deltas),
+                     "better": sum(d > 0 for d in deltas), "worse": sum(d < 0 for d in deltas),
+                     "cost": sum(row["cost"] for row in final.values())}
+
+
+def stage_estimate(client: Any, model: str, requests: dict[str, dict], costs: Costs, output_tokens: float) -> float:
+    return costs.dollars(model, count_input_tokens(client, requests) * len(requests), output_tokens * len(requests)) if requests else 0.0
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("command", choices=["estimate", "run", "report"])
+    parser.add_argument("setups", nargs="*", help="setup names from configs/reflection.toml; default: all")
+    parser.add_argument("--dev", type=Path, default=RUNS_DIR.parent / "raw" / "qasper-dev-v0.3.json")
+    parser.add_argument("--questions", type=int, help="size of the M1 question sample; default: the config's")
+    parser.add_argument("--max-dollars", type=float, help="required for run: per stage, refuse if the estimate is higher")
+    args = parser.parse_args()
+    sample = tomllib.loads(ANSWERING.read_text())["sample"]
+    papers, costs, runs, max_words = load_split(args.dev), load_costs(), load_runs(), load_max_words()
+    client = None
+    if args.command != "report":
+        import anthropic
+        client = anthropic.Anthropic()
+    for name, setup in load_setups().items():
+        if args.setups and name not in args.setups:
+            continue
+        writer = runs[setup.writer]
+        contexts = build_contexts(setup, papers, args.questions or sample["questions"], sample["seed"], max_words)
+        paths = stage_paths(setup, writer, max_words)
+        critiques = {r["question_id"]: r for r in read_answers(paths["critic"][0])}
+        revisions = {r["question_id"]: r for r in read_answers(paths["revise"][0])}
+        if args.command == "report":
+            r = report(papers, contexts, final_answers(contexts, critiques, revisions))
+            print(f"{name:28} answer-F1 {r['draft_answer_f1']:.3f} -> {r['answer_f1']:.3f}  evidence-F1 {r['evidence_f1']:.3f}  "
+                  f"unanswerable {r['predicted_unanswerable']:.1%}  revised {r['revised']} (better {r['better']}, worse "
+                  f"{r['worse']})  ${r['cost']:.2f}")
+            continue
+        draft_output = statistics.mean(c.draft["output_tokens"] for c in contexts.values())
+        pending_critic = {q: p for q, p in critic_requests(setup, contexts).items() if q not in critiques}
+        critic_cost = stage_estimate(client, setup.critic.model, pending_critic, costs, costs.assumed_output_tokens) if setup.critic else 0.0
+        if args.command == "estimate":
+            # Upper bound for the revise stage: every draft revised, unless the critic has already run.
+            found = lambda c: problems(setup, c, critiques.get(c.question.id)) or ([Finding("wrong_or_incomplete", "x")] if setup.critic else [])
+            upper = {q: revise_request(writer, c, f) for q, c in contexts.items() if q not in revisions and (f := found(c))}
+            revise_cost = stage_estimate(client, writer.model, upper, costs, draft_output)
+            print(f"{name:28} critic {len(pending_critic)} requests ≈ ${critic_cost:.2f}  revise up to {len(upper)} ≈ ${revise_cost:.2f}")
+            continue
+        if args.max_dollars is None:
+            raise SystemExit("run needs --max-dollars")
+        if setup.critic:
+            if critic_cost > args.max_dollars and not paths["critic"][1].exists():
+                raise SystemExit(f"{name}: critic estimate ${critic_cost:.2f} is over --max-dollars {args.max_dollars}")
+            submit_and_collect(client, critic_requests(setup, contexts), *paths["critic"], critique_record(setup, costs))
+            critiques = {r["question_id"]: r for r in read_answers(paths["critic"][0])}
+        pending_revise = {q: p for q, p in revise_requests(setup, writer, contexts, critiques).items() if q not in revisions}
+        revise_cost = stage_estimate(client, writer.model, pending_revise, costs, draft_output)
+        if revise_cost > args.max_dollars and not paths["revise"][1].exists():
+            raise SystemExit(f"{name}: revise estimate ${revise_cost:.2f} is over --max-dollars {args.max_dollars}")
+        submit_and_collect(client, revise_requests(setup, writer, contexts, critiques), *paths["revise"], revision_record(writer, costs))
+        print(f"{name}: done; run `report` to score it")
+
+
+if __name__ == "__main__":
+    main()

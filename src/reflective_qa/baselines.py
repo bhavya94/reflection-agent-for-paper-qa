@@ -121,6 +121,14 @@ def _record(answer: Answer, run: RunConfig, costs: Costs) -> dict:
             "cost": costs.dollars(run.model, answer.input_tokens, answer.output_tokens)}
 
 
+def count_input_tokens(client: Any, requests: dict[str, dict], sample: int = 50) -> float:
+    """Mean input tokens over an evenly spaced sample of the requests, counted with the free count_tokens endpoint."""
+    ids = list(requests)
+    sampled = ids[:: max(1, len(ids) // sample)][:sample]
+    return statistics.mean(client.messages.count_tokens(**{k: v for k, v in requests[qid].items() if k != "max_tokens"})
+                           .input_tokens for qid in sampled)
+
+
 def estimate(client: Any, run: RunConfig, requests: dict[str, dict], costs: Costs, sample: int = 50,
              out_dir: Path = RUNS_DIR) -> dict:
     """Batch cost of answering `requests`. Input tokens are counted (free) on an evenly spaced sample; output
@@ -129,12 +137,9 @@ def estimate(client: Any, run: RunConfig, requests: dict[str, dict], costs: Cost
     if not ids:
         return {"run": run.name, "questions": 0, "input_tokens": 0, "output_tokens": 0, "output_measured": False,
                 "dollars": 0.0}
-    sampled = ids[:: max(1, len(ids) // sample)][:sample]
-    counted = [client.messages.count_tokens(**{k: v for k, v in requests[qid].items() if k != "max_tokens"}).input_tokens
-               for qid in sampled]
     answered = read_answers(run_paths(run, out_dir)[0])
     output = statistics.mean(r["output_tokens"] for r in answered) if answered else costs.assumed_output_tokens
-    input_mean = statistics.mean(counted)
+    input_mean = count_input_tokens(client, requests, sample)
     return {"run": run.name, "questions": len(ids), "input_tokens": input_mean, "output_tokens": output,
             "output_measured": bool(answered),
             "dollars": costs.dollars(run.model, input_mean * len(ids), output * len(ids))}
