@@ -25,8 +25,8 @@ SYSTEM = "\n".join([
     "- Check the draft against each item below:",
     *(f"  - {name}: {meaning}" for name, meaning in CHECKLIST.items()),
     '- If no item applies, return verdict "pass" and no problems.',
-    '- Otherwise return verdict "revise" and one problem per item that applies. In "detail", say what to change and',
-    "  name the passage ID that shows it, so the writer can fix it.",
+    '- Otherwise return verdict "revise" and one problem per item that applies. In "detail", say what to change so',
+    "  the writer can fix it; when a passage shows it, name that passage's ID.",
     "- Automatic check results, when given, can be wrong. Confirm or reject each one; report only real problems.",
 ])
 
