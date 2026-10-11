@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from reflective_qa.answering import RunConfig
-from reflective_qa.baselines import Costs, build_requests, estimate, read_answers, run_batch, run_paths
+from reflective_qa.baselines import Costs, build_requests, estimate, read_answers, report, run_batch, run_paths
 from reflective_qa.data import load_split
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mini_qasper.json"
@@ -110,3 +110,10 @@ def test_each_answer_records_its_cost_and_estimates_switch_to_measured_output(tm
     assert read_answers(path)[0]["cost"] == (1000 * 2.0 + 100 * 10.0) / 1e6 * 0.5
     after = estimate(FakeClient(), RUN, _requests(), COSTS, out_dir=tmp_path)
     assert after["output_tokens"] == 100 and after["output_measured"]
+
+
+def test_report_scores_a_run_on_its_own_sample_with_its_cost(tmp_path):
+    run_batch(FakeClient(), RUN, _requests(n=2), COSTS, tmp_path, poll_seconds=0)
+    result = report(RUN, _requests(n=2), load_split(FIXTURE), tmp_path)
+    assert (result["questions"], result["missing"]) == (2, 0)  # the third fixture question is outside the sample
+    assert result["cost"] == 2 * (1000 * 2.0 + 100 * 10.0) / 1e6 * 0.5 and result["output_tokens"] == 100

@@ -52,3 +52,8 @@ def test_predictions_load_from_jsonl_with_paragraph_id_evidence(tmp_path):
     path = tmp_path / "predictions.jsonl"
     path.write_text(json.dumps({"question_id": "q1", "predicted_answer": "Yes", "predicted_evidence": ["s0p0"]}) + "\n")
     assert load_predictions(path) == {"q1": Prediction("Yes", ("s0p0",))}
+
+
+def test_scoring_can_be_limited_to_a_question_sample():
+    result = score(load_split(FIXTURE), {"q-abstractive": Prediction("a tiny model", ("s0p0",))}, {"q-abstractive"})
+    assert (result["questions"], result["missing"], result["answer_f1"]) == (1, 0, 1.0)

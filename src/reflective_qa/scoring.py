@@ -64,9 +64,10 @@ def is_unanswerable(answer: str) -> bool:
     return normalize(answer) == normalize(UNANSWERABLE)
 
 
-def score(papers: list[Paper], predictions: dict[str, Prediction]) -> dict:
-    """Scores every text-only question; a missing prediction scores 0 on both metrics, like the official evaluator."""
-    questions = text_only_questions(papers)
+def score(papers: list[Paper], predictions: dict[str, Prediction], question_ids: set[str] | None = None) -> dict:
+    """Scores every text-only question, or only those in `question_ids`; a missing prediction scores 0 on both
+    metrics, like the official evaluator."""
+    questions = [q for q in text_only_questions(papers) if question_ids is None or q.id in question_ids]
     answer_scores, evidence_scores, by_type = [], [], {}
     for question in questions:
         prediction = predictions.get(question.id)
