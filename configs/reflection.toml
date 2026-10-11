@@ -1,0 +1,3 @@
+# Code checks on a draft answer: free, deterministic feedback for the critic and the writer.
+# Thresholds were set on the QASPER train split, not on dev.
+max_answer_words = 30  # 90% of annotator answers on train are 32 words or fewer
