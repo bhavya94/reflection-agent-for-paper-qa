@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Reflective QA Results</title>
-<meta name="description" content="Does one round of self-review make Claude answer research-paper questions better? Results on 200 QASPER questions.">
+<meta name="description" content="Does a review step make an AI agent answer questions about research papers better? An experiment with Claude on 200 QASPER questions.">
 <style>
   :root { color-scheme: light; --page:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink-2:#52514e; --muted:#898781;
     --grid:#e1e0d9; --axis:#c3c2b7; --ring:rgba(11,11,11,.10); --band:rgba(11,11,11,.06);
@@ -18,75 +18,123 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--page); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
   main { max-width: 980px; margin: 0 auto; padding: 32px 16px 64px; }
-  h1 { font-size: 30px; line-height: 1.2; margin: 0 0 10px; } h2 { font-size: 20px; margin: 44px 0 6px; } h3 { font-size: 15px; margin: 0 0 6px; }
-  p, li { color: var(--ink-2); max-width: 74ch; } .lede { font-size: 18px; color: var(--ink); } a { color: var(--s1); }
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 24px 0; }
+  h1 { font-size: 30px; line-height: 1.2; margin: 0 0 10px; } h2 { font-size: 22px; margin: 52px 0 6px; } h3 { font-size: 16px; margin: 28px 0 6px; }
+  p, li { color: var(--ink-2); max-width: 74ch; } .lede { font-size: 18px; color: var(--ink); } a { color: var(--s1); } b { color: var(--ink); }
+  .eyebrow { font-size: 13px; color: var(--muted); margin: 0 0 6px; } nav { font-size: 14px; display: flex; flex-wrap: wrap; gap: 6px 16px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 16px 0; }
   .tile, .card { background: var(--surface); border: 1px solid var(--ring); border-radius: 12px; padding: 16px; }
   .tile .label { font-size: 13px; color: var(--ink-2); } .tile .value { font-size: 30px; font-weight: 600; margin: 2px 0; }
-  .tile .note { font-size: 13px; color: var(--muted); }
+  .tile .note, .meta { font-size: 13px; color: var(--muted); }
   table { border-collapse: collapse; width: 100%; font-size: 14px; } th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--grid); vertical-align: top; }
   th { color: var(--ink-2); font-weight: 600; } .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .scroll { overflow-x: auto; }
+  .scroll { overflow-x: auto; } details { margin-top: 8px; font-size: 14px; color: var(--ink-2); }
   svg text { fill: var(--muted); font-size: 12px; } svg .label { fill: var(--ink-2); font-size: 13px; }
   .legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 8px 0; font-size: 13px; color: var(--ink-2); }
   .legend span { display: inline-flex; align-items: center; gap: 6px; } .key { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
-  .examples { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
-  .example .kind { font-size: 13px; font-weight: 600; color: var(--ink); } .example .q { color: var(--ink); margin: 6px 0; }
-  .example .ans { font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--ink); background: var(--band); border-radius: 6px; padding: 6px 8px; margin: 4px 0; }
-  .example .meta { font-size: 13px; color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+  .q { color: var(--ink); margin: 6px 0; } .kind { font-size: 13px; font-weight: 600; }
+  .ans { font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--ink); background: var(--band); border-radius: 6px; padding: 6px 8px; margin: 4px 0; }
+  .steps { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); } .step .n { display: inline-flex; width: 24px; height: 24px; border-radius: 50%; background: var(--ink); color: var(--surface);
+    font-size: 13px; align-items: center; justify-content: center; margin-right: 8px; } .step p { margin: 6px 0 0; font-size: 14px; }
   #tip { position: fixed; pointer-events: none; background: var(--surface); color: var(--ink); border: 1px solid var(--ring); border-radius: 8px;
     padding: 6px 10px; font-size: 13px; box-shadow: 0 4px 16px rgba(0,0,0,.12); display: none; z-index: 10; max-width: 300px; }
-  .steps { counter-reset: s; list-style: none; padding: 0; } .steps li { counter-increment: s; margin: 8px 0; padding-left: 34px; position: relative; }
-  .steps li::before { content: counter(s); position: absolute; left: 0; top: 0; width: 24px; height: 24px; border-radius: 50%; background: var(--ink); color: var(--surface);
-    font-size: 13px; display: flex; align-items: center; justify-content: center; }
   footer { margin-top: 48px; font-size: 13px; color: var(--muted); }
 </style>
 </head>
 <body>
 <main>
-  <h1>Does one round of self-review make an AI answer research questions better?</h1>
-  <p class="lede">Not on average. A reviewer model fixes wrong “Unanswerable” answers, but it also rewrites good answers into
-    worse ones, and the two cancel out.</p>
-  <p id="setup-line"></p>
+  <p class="eyebrow">An experiment with Claude agents · 200 questions about research papers</p>
+  <h1>Does a review step make an AI agent answer research questions better?</h1>
+  <p class="lede">Not on average. A reviewer checks the agent's answer, and the agent revises it once. The reviewer fixes
+    answers where the agent gave up too early. It also rewrites good answers into worse ones. The two effects cancel.</p>
+  <nav><a href="#task">The task</a><a href="#agent">The agent</a><a href="#scores">How we score</a><a href="#results">Results</a><a href="#all">All scores</a></nav>
+
+  <h2 id="task">The task</h2>
+  <p>A person asks a question about one research paper. The AI must answer from the paper's text, and name the paragraphs
+    that support its answer. If the paper does not contain the answer, the correct reply is “Unanswerable”.</p>
+  <p>The questions come from <a href="https://allenai.org/data/qasper">QASPER</a>, a public dataset of questions about
+    natural language processing (NLP) papers. Experts read each full paper and wrote the reference answers. Some
+    questions have two or more expert answers, and the experts don't always agree. We use <b id="n-questions"></b>
+    questions, picked at random from the dataset's development split. 14.5% of them have an expert who answered “Unanswerable”.</p>
+  <div class="card" id="task-example"></div>
+
+  <h2 id="agent">The agent</h2>
+  <p>The agent has a writer model and a review step. It runs four steps for each question:</p>
+  <div class="grid steps">
+    <div class="card step"><b><span class="n">1</span>Search</b><p>Keyword search (BM25) picks the paragraphs that best match
+      the question. The larger model gets 20 paragraphs. The smaller model gets 5.</p></div>
+    <div class="card step"><b><span class="n">2</span>Answer</b><p>The writer model gives a short answer and the IDs of the
+      paragraphs it used.</p></div>
+    <div class="card step"><b><span class="n">3</span>Review</b><p>The review step checks the answer against the same
+      paragraphs. It lists problems, or passes the answer.</p></div>
+    <div class="card step"><b><span class="n">4</span>Revise once</b><p>If the review found problems, the writer gets them and
+      answers again. If not, the first answer stays.</p></div>
+  </div>
+  <p>A reviewer model checks each answer for seven problems:</p>
+  <ul>
+    <li>It says “Unanswerable”, but the paragraphs contain the answer.</li>
+    <li>It gives an answer, but the paragraphs don't contain one.</li>
+    <li>It is wrong, or misses part of the question.</li>
+    <li>It makes a claim the cited paragraphs don't support.</li>
+    <li>It cites the wrong paragraphs.</li>
+    <li>It is longer than needed.</li>
+    <li>It doesn't answer a yes/no question with Yes or No.</li>
+  </ul>
+  <p>Free code checks catch some of these without a model: long answers, citation errors, and the yes/no format.</p>
+  <p>We tried six versions of the review step. Claude Sonnet 5.5 is the larger model. Claude Haiku 5.5 is smaller and
+    cheaper, and it gets fewer paragraphs, so its first answers have more to fix.</p>
+  <div class="card scroll"><table id="versions"></table></div>
+  <p>The last two versions are almost the same, because the code checks flag almost no Haiku answers. The gap between their
+    results shows how much the scores move by chance.</p>
+
+  <h2 id="scores">How we score</h2>
+  <p><b>Answer score (answer-F1).</b> A number from 0 to 1 for each answer. It measures how many words the answer shares with
+    the expert answer. Extra words lower it, and missing words lower it. Small words like “the” and punctuation don't count.
+    When experts disagree, the best match counts. We report the average over all questions.</p>
+  <div class="card" id="score-example"></div>
+  <p>So a correct answer in different words can score low. Use the scores to compare versions on the same questions.</p>
+  <p><b>Evidence score (evidence-F1).</b> The same idea for citations: the overlap between the paragraphs the AI cited and the
+    paragraphs the experts marked. <b>Says “Unanswerable”</b> is the share of questions where the AI gave up.</p>
+  <p><b>Change and 95% interval.</b> The change is the average answer score after review minus the average before, on the same
+    questions. To see how much of the change is luck, we resample the questions 5,000 times (a paired bootstrap). If the
+    interval includes zero, the data can't tell the change from chance.</p>
+
+  <h2 id="results">Results</h2>
   <div class="tiles" id="tiles"></div>
-
-  <h2>Change in answer-F1 after one round of reflection</h2>
-  <p>Each line is a 95% interval for the change, from a paired bootstrap over the same questions. Every interval crosses
-    zero. The shaded band is the gap between two near-identical setups: differences inside it are noise.</p>
-  <div class="card"><svg id="forest" viewBox="0 0 760 300" width="100%" role="img" aria-label="Change in answer-F1 per setup with 95% intervals"></svg></div>
-
-  <h2>Where the change comes from</h2>
-  <p>The total change splits into three kinds of revision. Fixing a wrong “Unanswerable” adds; rewording an answer that
-    was already given mostly subtracts. Bars add up to each setup's total change (the dark tick).</p>
+  <h3>Change in answer score after one review round</h3>
+  <p>Each dot is a version's change in the average answer score. The line is its 95% interval. Every interval includes
+    zero. The shaded band is the noise: differences inside it mean nothing. “Haiku · code checks” changed only one answer.</p>
+  <div class="card"><svg id="forest" viewBox="0 0 760 300" width="100%" role="img" aria-label="Change in answer score per version with 95% intervals"></svg>
+    <details><summary>Table view</summary><div class="scroll"><table id="forest-table"></table></div></details></div>
+  <h3>Where the change comes from</h3>
+  <p>A review can change an answer in three ways. In all four versions with a reviewer model, fixing a wrong “Unanswerable”
+    raised the score. Rewording an answer lowered it in three of those four. A new “Unanswerable” always lowered it. Code
+    checks only shortened answers, which raised the score a little. The parts add up to the total change, shown by the tick.</p>
   <div class="legend" id="legend"></div>
-  <div class="card"><svg id="decomp" viewBox="0 0 760 300" width="100%" role="img" aria-label="Contribution of each revision kind to the change in answer-F1"></svg>
+  <div class="card"><svg id="decomp" viewBox="0 0 760 300" width="100%" role="img" aria-label="Part of the change from each kind of revision"></svg>
     <details><summary>Table view</summary><div class="scroll"><table id="decomp-table"></table></div></details></div>
+  <h3>Real examples</h3>
+  <p>The largest change of each kind across all six versions.</p>
+  <div class="grid" id="examples"></div>
 
-  <h2>Real revisions</h2>
-  <p>The largest change of each kind across all setups, scored against the annotators' answers.</p>
-  <div class="examples" id="examples"></div>
-
-  <h2>Scores over time</h2>
-  <p>Every scored version of the system, on the same questions with the same scorer. New versions add rows.</p>
+  <h2 id="all">All scores</h2>
+  <p>Every version, on the same questions with the same scoring. New versions add rows here. Cost is for all the questions,
+    first answers included, at Batch API prices.</p>
   <div class="card scroll"><table id="history"></table></div>
 
-  <h2>How it works</h2>
-  <ol class="steps">
-    <li><b>Retrieve.</b> BM25 picks paragraphs from the paper: 20 for Sonnet 5.5, 5 for Haiku 5.5 (the weak writer).</li>
-    <li><b>Answer.</b> The writer answers in JSON with a short answer and the paragraph IDs it used.</li>
-    <li><b>Check.</b> Free code checks flag long answers and citation problems.</li>
-    <li><b>Critique.</b> A critic reads the same paragraphs and the draft, and lists problems from a fixed checklist.</li>
-    <li><b>Revise once.</b> The writer fixes flagged drafts; everything else keeps its first answer.</li>
-  </ol>
-  <p>Caveats: answer-F1 rewards word overlap, so a correct answer worded differently can score low; the revise prompt was
-    adjusted after a 20-question pilot drawn from the same questions; one revise round, one dataset, two models.</p>
+  <h2>Limits</h2>
+  <ul>
+    <li>The answer score rewards shared words, so it can miss a correct answer in other words.</li>
+    <li>We changed the revise prompt after a 20-question pilot, and those 20 questions are part of the sample.</li>
+    <li>One review round, one dataset, two models.</li>
+  </ul>
   <p><a href="https://github.com/bhavya94/reflective-qa">Code on GitHub</a> ·
     <a href="https://github.com/bhavya94/agent-knowledge-base/blob/main/projects/reflective-qa/explainers/2026-10-11-m3-results.md">Detailed write-up</a></p>
   <footer id="footer"></footer>
 </main>
-<div id="tip" role="status"></div>
+<div id="tip" aria-hidden="true"></div>
 <script>
-const DATA = {"questions": 200, "baselines": [{"name": "sonnet-k20", "model": "claude-sonnet-5-5", "k": 20, "answer_f1": 0.5119898207921308, "evidence_f1": 0.6205057955012648, "unanswerable": 0.16, "cost": 0.952044}, {"name": "sonnet-closed-book", "model": "claude-sonnet-5-5", "k": 0, "answer_f1": 0.2740674971132277, "evidence_f1": null, "unanswerable": 0.18, "cost": 0.16515}, {"name": "haiku-k5", "model": "claude-haiku-5-5", "k": 5, "answer_f1": 0.4254802655399462, "evidence_f1": 0.41536066929325355, "unanswerable": 0.295, "cost": 0.0214644}], "setups": [{"name": "sonnet-code-feedback", "writer": "sonnet-k20", "critic": null, "code_feedback": true, "before": 0.5119898207921308, "after": 0.5199042234075254, "delta": 0.007914402615394615, "ci": [-0.0009748681610891255, 0.018806045172972404], "evidence_f1": 0.6225085680096554, "unanswerable": 0.16, "revised": 15, "better": 8, "worse": 7, "cost": 0.086648, "kinds": {"abstain_to_answer": {"n": 0, "mean_delta": 0.0, "label": "Unanswerable \u2192 answer"}, "answer_to_abstain": {"n": 0, "mean_delta": 0.0, "label": "Answer \u2192 Unanswerable"}, "reworded": {"n": 15, "mean_delta": 0.10552536820526154, "label": "Reworded"}}, "contributions": {"abstain_to_answer": 0.0, "answer_to_abstain": 0.0, "reworded": 0.007914402615394616}}, {"name": "haiku-code-feedback", "writer": "haiku-k5", "critic": null, "code_feedback": true, "before": 0.4254802655399462, "after": 0.4261289803502277, "delta": 0.0006487148102815178, "ci": [0.0, 0.0019461444308445535], "evidence_f1": 0.41536066929325355, "unanswerable": 0.295, "revised": 1, "better": 1, "worse": 0, "cost": 0.00011585000000000001, "kinds": {"abstain_to_answer": {"n": 0, "mean_delta": 0.0, "label": "Unanswerable \u2192 answer"}, "answer_to_abstain": {"n": 0, "mean_delta": 0.0, "label": "Answer \u2192 Unanswerable"}, "reworded": {"n": 1, "mean_delta": 0.12974296205630356, "label": "Reworded"}}, "contributions": {"abstain_to_answer": 0.0, "answer_to_abstain": 0.0, "reworded": 0.0006487148102815178}}, {"name": "sonnet-self-critique", "writer": "sonnet-k20", "critic": "claude-sonnet-5-5", "code_feedback": false, "before": 0.5119898207921308, "after": 0.5058864522405712, "delta": -0.0061033685515596795, "ci": [-0.03297190830474194, 0.020389070985195882], "evidence_f1": 0.6369183155654703, "unanswerable": 0.12, "revised": 32, "better": 14, "worse": 17, "cost": 1.227453, "kinds": {"abstain_to_answer": {"n": 10, "mean_delta": 0.14497076023391814, "label": "Unanswerable \u2192 answer"}, "answer_to_abstain": {"n": 2, "mean_delta": -0.08571428571428572, "label": "Answer \u2192 Unanswerable"}, "reworded": {"n": 20, "mean_delta": -0.12494763706112728, "label": "Reworded"}}, "contributions": {"abstain_to_answer": 0.007248538011695906, "answer_to_abstain": -0.0008571428571428571, "reworded": -0.012494763706112728}}, {"name": "haiku-self-critique", "writer": "haiku-k5", "critic": "claude-haiku-5-5", "code_feedback": false, "before": 0.4254802655399462, "after": 0.418706586493387, "delta": -0.006773679046559236, "ci": [-0.033005832554574815, 0.01635496209980456], "evidence_f1": 0.43778637093243833, "unanswerable": 0.19, "revised": 32, "better": 14, "worse": 9, "cost": 0.0342757, "kinds": {"abstain_to_answer": {"n": 23, "mean_delta": 0.07000170928316571, "label": "Unanswerable \u2192 answer"}, "answer_to_abstain": {"n": 2, "mean_delta": -1.0, "label": "Answer \u2192 Unanswerable"}, "reworded": {"n": 7, "mean_delta": -0.13782501754637977, "label": "Reworded"}}, "contributions": {"abstain_to_answer": 0.008050196567564056, "answer_to_abstain": -0.01, "reworded": -0.004823875614123292}}, {"name": "haiku-sonnet-critic", "writer": "haiku-k5", "critic": "claude-sonnet-5-5", "code_feedback": false, "before": 0.4254802655399462, "after": 0.4211244744686472, "delta": -0.004355791071298994, "ci": [-0.03810592912546955, 0.027794974979570636], "evidence_f1": 0.42799503866919597, "unanswerable": 0.24, "revised": 55, "better": 23, "worse": 23, "cost": 0.47297385, "kinds": {"abstain_to_answer": {"n": 16, "mean_delta": 0.1379902474322516, "label": "Unanswerable \u2192 answer"}, "answer_to_abstain": {"n": 5, "mean_delta": -0.13333333333333333, "label": "Answer \u2192 Unanswerable"}, "reworded": {"n": 34, "mean_delta": -0.07095104430909288, "label": "Reworded"}}, "contributions": {"abstain_to_answer": 0.011039219794580129, "answer_to_abstain": -0.003333333333333333, "reworded": -0.012061677532545789}}, {"name": "haiku-sonnet-critic-checks", "writer": "haiku-k5", "critic": "claude-sonnet-5-5", "code_feedback": true, "before": 0.4254802655399462, "after": 0.44052932094285807, "delta": 0.015049055402911848, "ci": [-0.015484681041952622, 0.045288478044905676], "evidence_f1": 0.42140153853636997, "unanswerable": 0.255, "revised": 51, "better": 26, "worse": 15, "cost": 0.470091, "kinds": {"abstain_to_answer": {"n": 13, "mean_delta": 0.17869148197202495, "label": "Unanswerable \u2192 answer"}, "answer_to_abstain": {"n": 5, "mean_delta": -0.13333333333333333, "label": "Answer \u2192 Unanswerable"}, "reworded": {"n": 33, "mean_delta": 0.04101480247311248, "label": "Reworded"}}, "contributions": {"abstain_to_answer": 0.011614946328181622, "answer_to_abstain": -0.003333333333333333, "reworded": 0.00676744240806356}}], "examples": {"reworded": {"question": "Is the position in the sequence part of the input?", "before": "No", "after": "Not as an explicit input, but implicitly: each position has its own independent decoder, and the encoder reads the images in order.", "delta": -1.0, "gold": ["No", "Yes"], "setup": "sonnet-self-critique"}, "shortened": {"question": "Which datasets are used for evaluation?", "before": "ARC, consumer health questions (GARD/TREC-derived dataset from Roberts et al.), and MLBioMedLAT", "after": "ARC, TREC, GARD, MLBioMedLAT", "delta": 0.75, "gold": ["ARC , TREC, GARD , MLBioMedLAT ", "ARC, TREC, GARD, MLBioMedLAT"], "setup": "haiku-sonnet-critic-checks"}, "abstain_to_answer": {"question": "Do they report results only on English data?", "before": "Unanswerable", "after": "Yes", "delta": 1.0, "gold": ["Yes", "Yes"], "setup": "sonnet-self-critique"}}, "spent": 3.76984755, "noise": {"pair": ["haiku-sonnet-critic", "haiku-sonnet-critic-checks"], "gap": 0.01940484647421087}, "generated": "2026-10-11", "commit": "fb9865b"};
+const DATA = {"questions": 200, "baselines": [{"name": "sonnet-k20", "model": "claude-sonnet-5-5", "k": 20, "answer_f1": 0.5119898207921308, "evidence_f1": 0.6205057955012648, "unanswerable": 0.16, "cost": 0.952044}, {"name": "sonnet-closed-book", "model": "claude-sonnet-5-5", "k": 0, "answer_f1": 0.2740674971132277, "evidence_f1": null, "unanswerable": 0.18, "cost": 0.16515}, {"name": "haiku-k5", "model": "claude-haiku-5-5", "k": 5, "answer_f1": 0.4254802655399462, "evidence_f1": 0.41536066929325355, "unanswerable": 0.295, "cost": 0.0214644}], "setups": [{"name": "sonnet-code-feedback", "writer": "sonnet-k20", "critic": null, "code_feedback": true, "before": 0.5119898207921308, "after": 0.5199042234075254, "delta": 0.007914402615394615, "ci": [-0.0009748681610891255, 0.018806045172972404], "evidence_f1": 0.6225085680096554, "unanswerable": 0.16, "revised": 15, "better": 8, "worse": 7, "cost": 0.086648, "kinds": {"abstain_to_answer": {"n": 0, "mean_delta": 0.0, "label": "Unanswerable \u2192 answer"}, "answer_to_abstain": {"n": 0, "mean_delta": 0.0, "label": "Answer \u2192 Unanswerable"}, "reworded": {"n": 15, "mean_delta": 0.10552536820526154, "label": "Reworded"}}, "contributions": {"abstain_to_answer": 0.0, "answer_to_abstain": 0.0, "reworded": 0.007914402615394616}}, {"name": "haiku-code-feedback", "writer": "haiku-k5", "critic": null, "code_feedback": true, "before": 0.4254802655399462, "after": 0.4261289803502277, "delta": 0.0006487148102815178, "ci": [0.0, 0.0019461444308445535], "evidence_f1": 0.41536066929325355, "unanswerable": 0.295, "revised": 1, "better": 1, "worse": 0, "cost": 0.00011585000000000001, "kinds": {"abstain_to_answer": {"n": 0, "mean_delta": 0.0, "label": "Unanswerable \u2192 answer"}, "answer_to_abstain": {"n": 0, "mean_delta": 0.0, "label": "Answer \u2192 Unanswerable"}, "reworded": {"n": 1, "mean_delta": 0.12974296205630356, "label": "Reworded"}}, "contributions": {"abstain_to_answer": 0.0, "answer_to_abstain": 0.0, "reworded": 0.0006487148102815178}}, {"name": "sonnet-self-critique", "writer": "sonnet-k20", "critic": "claude-sonnet-5-5", "code_feedback": false, "before": 0.5119898207921308, "after": 0.5058864522405712, "delta": -0.0061033685515596795, "ci": [-0.03297190830474194, 0.020389070985195882], "evidence_f1": 0.6369183155654703, "unanswerable": 0.12, "revised": 32, "better": 14, "worse": 17, "cost": 1.227453, "kinds": {"abstain_to_answer": {"n": 10, "mean_delta": 0.14497076023391814, "label": "Unanswerable \u2192 answer"}, "answer_to_abstain": {"n": 2, "mean_delta": -0.08571428571428572, "label": "Answer \u2192 Unanswerable"}, "reworded": {"n": 20, "mean_delta": -0.12494763706112728, "label": "Reworded"}}, "contributions": {"abstain_to_answer": 0.007248538011695906, "answer_to_abstain": -0.0008571428571428571, "reworded": -0.012494763706112728}}, {"name": "haiku-self-critique", "writer": "haiku-k5", "critic": "claude-haiku-5-5", "code_feedback": false, "before": 0.4254802655399462, "after": 0.418706586493387, "delta": -0.006773679046559236, "ci": [-0.033005832554574815, 0.01635496209980456], "evidence_f1": 0.43778637093243833, "unanswerable": 0.19, "revised": 32, "better": 14, "worse": 9, "cost": 0.0342757, "kinds": {"abstain_to_answer": {"n": 23, "mean_delta": 0.07000170928316571, "label": "Unanswerable \u2192 answer"}, "answer_to_abstain": {"n": 2, "mean_delta": -1.0, "label": "Answer \u2192 Unanswerable"}, "reworded": {"n": 7, "mean_delta": -0.13782501754637977, "label": "Reworded"}}, "contributions": {"abstain_to_answer": 0.008050196567564056, "answer_to_abstain": -0.01, "reworded": -0.004823875614123292}}, {"name": "haiku-sonnet-critic", "writer": "haiku-k5", "critic": "claude-sonnet-5-5", "code_feedback": false, "before": 0.4254802655399462, "after": 0.4211244744686472, "delta": -0.004355791071298994, "ci": [-0.03810592912546955, 0.027794974979570636], "evidence_f1": 0.42799503866919597, "unanswerable": 0.24, "revised": 55, "better": 23, "worse": 23, "cost": 0.47297385, "kinds": {"abstain_to_answer": {"n": 16, "mean_delta": 0.1379902474322516, "label": "Unanswerable \u2192 answer"}, "answer_to_abstain": {"n": 5, "mean_delta": -0.13333333333333333, "label": "Answer \u2192 Unanswerable"}, "reworded": {"n": 34, "mean_delta": -0.07095104430909288, "label": "Reworded"}}, "contributions": {"abstain_to_answer": 0.011039219794580129, "answer_to_abstain": -0.003333333333333333, "reworded": -0.012061677532545789}}, {"name": "haiku-sonnet-critic-checks", "writer": "haiku-k5", "critic": "claude-sonnet-5-5", "code_feedback": true, "before": 0.4254802655399462, "after": 0.44052932094285807, "delta": 0.015049055402911848, "ci": [-0.015484681041952622, 0.045288478044905676], "evidence_f1": 0.42140153853636997, "unanswerable": 0.255, "revised": 51, "better": 26, "worse": 15, "cost": 0.470091, "kinds": {"abstain_to_answer": {"n": 13, "mean_delta": 0.17869148197202495, "label": "Unanswerable \u2192 answer"}, "answer_to_abstain": {"n": 5, "mean_delta": -0.13333333333333333, "label": "Answer \u2192 Unanswerable"}, "reworded": {"n": 33, "mean_delta": 0.04101480247311248, "label": "Reworded"}}, "contributions": {"abstain_to_answer": 0.011614946328181622, "answer_to_abstain": -0.003333333333333333, "reworded": 0.00676744240806356}}], "examples": {"reworded": {"question": "Is the position in the sequence part of the input?", "before": "No", "after": "Not as an explicit input, but implicitly: each position has its own independent decoder, and the encoder reads the images in order.", "f1": [1.0, 0.0], "delta": -1.0, "gold": ["No", "Yes"], "setup": "sonnet-self-critique"}, "shortened": {"question": "Which datasets are used for evaluation?", "before": "ARC, consumer health questions (GARD/TREC-derived dataset from Roberts et al.), and MLBioMedLAT", "after": "ARC, TREC, GARD, MLBioMedLAT", "f1": [0.25, 1.0], "delta": 0.75, "gold": ["ARC , TREC, GARD , MLBioMedLAT ", "ARC, TREC, GARD, MLBioMedLAT"], "setup": "haiku-sonnet-critic-checks"}, "abstain_to_answer": {"question": "Do they report results only on English data?", "before": "Unanswerable", "after": "Yes", "f1": [0.0, 1.0], "delta": 1.0, "gold": ["Yes", "Yes"], "setup": "sonnet-self-critique"}, "answer_to_abstain": {"question": "Are humans and machine learning systems fooled by the same kinds of illusions?", "before": "No", "after": "Unanswerable", "f1": [0.0, 1.0], "delta": 1.0, "gold": ["Unanswerable"], "setup": "haiku-sonnet-critic"}}, "spent": 3.76984755, "noise": {"pair": ["haiku-sonnet-critic", "haiku-sonnet-critic-checks"], "gap": 0.01940484647421087}, "generated": "2026-10-11", "commit": "c9dbd83"};
 const el = (tag, attrs = {}, text) => { const n = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); if (text !== undefined) n.textContent = text; return n; };
 const NS = "http://www.w3.org/2000/svg";
@@ -99,29 +147,48 @@ const tip = document.getElementById("tip");
 const showTip = (e, lines) => { tip.replaceChildren(...lines.map((t) => el("div", {}, t))); tip.style.display = "block";
   tip.style.left = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8) + "px"; tip.style.top = (e.clientY + 14) + "px"; };
 const hideTip = () => { tip.style.display = "none"; };
-const NAMES = { "sonnet-code-feedback": "Sonnet · code feedback", "haiku-code-feedback": "Haiku · code feedback",
-  "sonnet-self-critique": "Sonnet · self-critique", "haiku-self-critique": "Haiku · self-critique",
-  "haiku-sonnet-critic": "Haiku · Sonnet critic", "haiku-sonnet-critic-checks": "Haiku · Sonnet critic + checks",
-  "sonnet-k20": "Sonnet 5.5 · 20 paragraphs", "sonnet-closed-book": "Sonnet 5.5 · closed-book", "haiku-k5": "Haiku 5.5 · 5 paragraphs" };
+const NAMES = { "sonnet-code-feedback": "Sonnet · code checks", "haiku-code-feedback": "Haiku · code checks",
+  "sonnet-self-critique": "Sonnet · self-review", "haiku-self-critique": "Haiku · self-review",
+  "haiku-sonnet-critic": "Haiku · Sonnet reviews", "haiku-sonnet-critic-checks": "Haiku · Sonnet reviews + checks",
+  "sonnet-k20": "Sonnet 5.5 · 20 paragraphs", "sonnet-closed-book": "Sonnet 5.5 · no paragraphs (from memory)", "haiku-k5": "Haiku 5.5 · 5 paragraphs" };
 const name = (n) => NAMES[n] || n;
+const MODELS = { "claude-sonnet-5-5": "Sonnet 5.5", "claude-haiku-5-5": "Haiku 5.5" };
+const model = (m) => MODELS[m] || m;
+const run = Object.fromEntries(DATA.baselines.map((b) => [b.name, b]));
+const layout = (svg) => (svg.parentElement.clientWidth < 560 ? { W: 400, L: 8, rowH: 52, narrow: true } : { W: 760, L: 230, rowH: 40, narrow: false });
+const rowLabel = (n, x, y, narrow) => s("text", narrow ? { x, y, class: "label" } : { x: x - 12, y, "text-anchor": "end", class: "label" }, n);
 const KINDS = [["abstain_to_answer", "--s1"], ["reworded", "--s2"], ["answer_to_abstain", "--s3"]];
+const quoted = (xs) => xs.map((g) => "“" + g + "”").join(", ");
+const table = (id, header, rows, textColumns = 2) => { const t = document.getElementById(id), head = el("tr"), cls = (i) => (i < textColumns ? {} : { class: "num" });
+  t.replaceChildren(); header.forEach((h, i) => head.append(el("th", cls(i), h))); t.append(head);
+  for (const row of rows) { const tr = el("tr"); row.forEach((c, i) => tr.append(el("td", cls(i), c))); t.append(tr); } };
 
-document.getElementById("setup-line").textContent = `${DATA.questions} questions about NLP research papers (QASPER dev), ` +
-  "answered by Claude Sonnet 5.5 and Claude Haiku 5.5 from retrieved paragraphs, then reviewed and revised once.";
+document.getElementById("n-questions").textContent = DATA.questions;
+const ex = DATA.examples.shortened;
+if (ex) {
+  document.getElementById("task-example").append(el("div", { class: "meta" }, "A real question from the sample"),
+    el("div", { class: "q" }, `“${ex.question}”`), el("div", { class: "meta" }, `Expert answers: ${quoted(ex.gold)}`));
+  document.getElementById("score-example").append(el("div", { class: "meta" }, `Same question. Expert answers: ${quoted(ex.gold)}`),
+    el("div", { class: "ans" }, ex.before), el("div", { class: "meta" }, `First answer: score ${ex.f1[0].toFixed(2)}. Extra words lower the score.`),
+    el("div", { class: "ans" }, ex.after), el("div", { class: "meta" }, `After review: score ${ex.f1[1].toFixed(2)}. Shorter, and closer to the experts' words.`));
+}
+table("versions", ["Version", "Writer", "Who reviews", "Reviewer sees code checks"], DATA.setups.map((r) => [name(r.name),
+  model(run[r.writer].model), r.critic ? (r.critic === run[r.writer].model ? "The writer itself" : model(r.critic)) : "No model: code checks only",
+  r.critic ? (r.code_feedback ? "Yes" : "No") : "—"]), 4);
 
 const best = DATA.baselines.reduce((a, b) => (b.answer_f1 > a.answer_f1 ? b : a));
 const biggest = DATA.setups.reduce((a, b) => (b.delta > a.delta ? b : a));
 for (const [label, value, note] of [
-  ["Best one-shot answer-F1", best.answer_f1.toFixed(3), name(best.name)],
-  ["Largest change from reflection", f3(biggest.delta), `${name(biggest.name)} · 95% CI ${f3(biggest.ci[0])} to ${f3(biggest.ci[1])}`],
-  ["Noise between near-identical setups", DATA.noise.gap.toFixed(3), "answer-F1 gap between two setups with the same inputs"],
-  ["API spend, whole project", usd(DATA.spent), "of a $20 budget, Batch API"]]) {
+  ["Best average answer score without review", best.answer_f1.toFixed(3), name(best.name)],
+  ["Largest change from review", f3(biggest.delta), `${name(biggest.name)} · 95% interval ${f3(biggest.ci[0])} to ${f3(biggest.ci[1])}`],
+  ["Noise", DATA.noise.gap.toFixed(3), "gap between the two nearly identical versions"],
+  ["API cost, whole project", usd(DATA.spent), "of a $20 budget, Batch API"]]) {
   const t = el("div", { class: "tile" }); t.append(el("div", { class: "label" }, label), el("div", { class: "value" }, value), el("div", { class: "note" }, note));
   document.getElementById("tiles").append(t);
 }
 
 function forest() {
-  const svg = document.getElementById("forest"), W = 760, L = 230, R = 30, T = 16, rowH = 40, rows = DATA.setups;
+  const svg = document.getElementById("forest"), { W, L, rowH, narrow } = layout(svg), R = 30, T = 16, rows = DATA.setups;
   const H = T + rows.length * rowH + 34; svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.replaceChildren();
   const lim = Math.max(0.05, ...rows.flatMap((r) => r.ci.map(Math.abs))) * 1.1;
   const x = (v) => L + (v + lim) / (2 * lim) * (W - L - R);
@@ -132,14 +199,16 @@ function forest() {
   }
   rows.forEach((r, i) => {
     const y = T + i * rowH + rowH / 2;
-    svg.append(s("text", { x: L - 12, y: y + 4, "text-anchor": "end", class: "label" }, name(r.name)));
+    svg.append(rowLabel(name(r.name), L, narrow ? y - 12 : y + 4, narrow));
     svg.append(s("line", { x1: x(r.ci[0]), x2: x(r.ci[1]), y1: y, y2: y, stroke: css("--point"), "stroke-width": 2, "stroke-linecap": "round" }));
     svg.append(s("circle", { cx: x(r.delta), cy: y, r: 5, fill: css("--point"), stroke: css("--surface"), "stroke-width": 2 }));
     const hit = s("rect", { x: L, y: y - rowH / 2, width: W - L - R, height: rowH, fill: "transparent" });
-    hit.addEventListener("pointermove", (e) => showTip(e, [`${name(r.name)}`, `Change ${f3(r.delta)} (95% CI ${f3(r.ci[0])} to ${f3(r.ci[1])})`,
-      `Answer-F1 ${r.before.toFixed(3)} → ${r.after.toFixed(3)}`, `${r.revised} answers changed: ${r.better} better, ${r.worse} worse`]));
+    hit.addEventListener("pointermove", (e) => showTip(e, [`${name(r.name)}`, `Change ${f3(r.delta)} (95% interval ${f3(r.ci[0])} to ${f3(r.ci[1])})`,
+      `Answer score ${r.before.toFixed(3)} → ${r.after.toFixed(3)}`, `${r.revised} answers changed: ${r.better} better, ${r.worse} worse`]));
     hit.addEventListener("pointerleave", hideTip); svg.append(hit);
   });
+  table("forest-table", ["Version", "Answer score before → after", "Change", "95% interval", "Answers changed (better / worse)"],
+    rows.map((r) => [name(r.name), `${r.before.toFixed(3)} → ${r.after.toFixed(3)}`, f3(r.delta), `${f3(r.ci[0])} to ${f3(r.ci[1])}`, `${r.revised} (${r.better} / ${r.worse})`]));
 }
 
 function decomposition() {
@@ -148,7 +217,7 @@ function decomposition() {
     const k = el("span"), key = el("span", { class: "key" }); key.style.background = `var(${color})`;
     k.append(key, document.createTextNode(DATA.setups[0].kinds[kind].label)); legend.append(k);
   }
-  const svg = document.getElementById("decomp"), W = 760, L = 230, R = 30, T = 10, rowH = 40, rows = DATA.setups;
+  const svg = document.getElementById("decomp"), { W, L, rowH, narrow } = layout(svg), R = 30, T = 10, rows = DATA.setups;
   const H = T + rows.length * rowH + 34; svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.replaceChildren();
   const extent = Math.max(0.02, ...rows.map((r) => Math.max(
     Object.values(r.contributions).filter((v) => v > 0).reduce((a, b) => a + b, 0),
@@ -159,8 +228,8 @@ function decomposition() {
     svg.append(s("text", { x: x(v), y: H - 12, "text-anchor": "middle" }, f3(v)));
   }
   rows.forEach((r, i) => {
-    const y = T + i * rowH + 10, h = 20;
-    svg.append(s("text", { x: L - 12, y: y + 14, "text-anchor": "end", class: "label" }, name(r.name)));
+    const y = T + i * rowH + (narrow ? 22 : 10), h = 20;
+    svg.append(rowLabel(name(r.name), L, narrow ? y - 6 : y + 14, narrow));
     let pos = 0, neg = 0;
     for (const [kind, color] of KINDS) {
       const v = r.contributions[kind]; if (!v) continue;
@@ -172,14 +241,8 @@ function decomposition() {
     }
     svg.append(s("line", { x1: x(r.delta), x2: x(r.delta), y1: y - 4, y2: y + h + 4, stroke: css("--point"), "stroke-width": 3 }));
   });
-  const table = document.getElementById("decomp-table"), head = el("tr"); table.replaceChildren();
-  for (const h of ["Setup", ...KINDS.map(([k]) => DATA.setups[0].kinds[k].label), "Total change"]) head.append(el("th", h === "Setup" ? {} : { class: "num" }, h));
-  table.append(head);
-  for (const r of rows) {
-    const tr = el("tr"); tr.append(el("td", {}, name(r.name)));
-    for (const [kind] of KINDS) tr.append(el("td", { class: "num" }, `${r.kinds[kind].n} × ${f3(r.kinds[kind].mean_delta)} = ${f3(r.contributions[kind])}`));
-    tr.append(el("td", { class: "num" }, f3(r.delta))); table.append(tr);
-  }
+  table("decomp-table", ["Version", ...KINDS.map(([k]) => DATA.setups[0].kinds[k].label), "Total change"], rows.map((r) => [name(r.name),
+    ...KINDS.map(([k]) => `${r.kinds[k].n} × ${f3(r.kinds[k].mean_delta)} = ${f3(r.contributions[k])}`), f3(r.delta)]));
 }
 
 function examples() {
@@ -187,30 +250,24 @@ function examples() {
   const titles = { abstain_to_answer: "Fixed a wrong “Unanswerable”", reworded: "Reworded a good answer into a worse one", shortened: "Shortened a long answer" };
   for (const kind of ["abstain_to_answer", "shortened", "reworded"]) {
     const e = DATA.examples[kind]; if (!e) continue;
-    const card = el("div", { class: "card example" });
-    card.append(el("div", { class: "kind" }, `${titles[kind]} · answer-F1 ${f3(e.delta)}`), el("div", { class: "q" }, `“${e.question}”`),
+    const card = el("div", { class: "card" });
+    card.append(el("div", { class: "kind" }, `${titles[kind]} · answer score ${e.f1[0].toFixed(2)} → ${e.f1[1].toFixed(2)}`), el("div", { class: "q" }, `“${e.question}”`),
       el("div", { class: "meta" }, "First answer"), el("div", { class: "ans" }, e.before),
       el("div", { class: "meta" }, "After review"), el("div", { class: "ans" }, e.after),
-      el("div", { class: "meta" }, `Annotators: ${e.gold.map((g) => "“" + g + "”").join(", ")} · ${name(e.setup)}`));
+      el("div", { class: "meta" }, `Expert answers: ${quoted(e.gold)} · ${name(e.setup)}`));
     box.append(card);
   }
 }
 
-function history() {
-  const table = document.getElementById("history"), head = el("tr");
-  for (const h of ["Version", "Configuration", "Answer-F1", "Evidence-F1", "Says “Unanswerable”", "Cost"]) head.append(el("th", ["Version", "Configuration"].includes(h) ? {} : { class: "num" }, h));
-  table.append(head);
-  const add = (version, config, af1, ef1, un, cost) => { const tr = el("tr");
-    tr.append(el("td", {}, version), el("td", {}, config), el("td", { class: "num" }, af1.toFixed(3)), el("td", { class: "num" }, ef1 === null ? "—" : ef1.toFixed(3)),
-      el("td", { class: "num" }, (un * 100).toFixed(1) + "%"), el("td", { class: "num" }, usd(cost))); table.append(tr); };
-  for (const b of DATA.baselines) add("M1 · one-shot", name(b.name), b.answer_f1, b.evidence_f1, b.unanswerable, b.cost);
-  for (const r of DATA.setups) add("M3 · one reflection round", name(r.name), r.after, r.evidence_f1, r.unanswerable, r.cost);
-}
-
-forest(); decomposition(); examples(); history();
+const pct = (x) => (x * 100).toFixed(1) + "%", ef = (x) => (x === null ? "—" : x.toFixed(3));
+table("history", ["Approach", "Version", "Answer score", "Evidence score", "Says “Unanswerable”", "Cost"], [
+  ...DATA.baselines.map((b) => ["Answer once", name(b.name), b.answer_f1.toFixed(3), ef(b.evidence_f1), pct(b.unanswerable), usd(b.cost)]),
+  ...DATA.setups.map((r) => ["Answer, review, revise once", name(r.name), r.after.toFixed(3), ef(r.evidence_f1), pct(r.unanswerable), usd(run[r.writer].cost + r.cost)])]);
+forest(); decomposition(); examples();
 document.getElementById("footer").textContent = `Generated ${DATA.generated} from commit ${DATA.commit}. Data: QASPER v0.3 dev split ` +
   "(Dasigi et al., 2021; CC BY 4.0). Models: Claude Sonnet 5.5 and Claude Haiku 5.5 via the Anthropic Batch API.";
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { forest(); decomposition(); });
+const redraw = () => { forest(); decomposition(); };
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", redraw); addEventListener("resize", redraw);
 </script>
 </body>
 </html>
