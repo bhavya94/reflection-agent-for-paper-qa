@@ -32,7 +32,7 @@ input = 0.10
 output = 0.50
 
 [sample]
-# A seeded random sample of text-only dev questions, shared by M1–M4 to fit the $20 API budget.
+# A seeded random sample of text-only dev questions, shared by M1–M3 to fit the $20 API budget.
 # Smaller samples are prefixes of larger ones, so a pilot's answers count toward the full run.
 questions = 200
 seed = 0
