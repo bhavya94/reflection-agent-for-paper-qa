@@ -2,3 +2,40 @@
 # Thresholds were set on the QASPER train split, not on dev.
 # 10.1% of train's extractive and abstractive annotator answers are longer, so about 1 in 10 good answers is flagged.
 max_answer_words = 35
+
+# Reflection setups. Each takes one M1 run's answers as first drafts (writer = a run in configs/answering.toml) and
+# revises the flagged ones once with the same writer model. critic = "none" means code feedback only: the checks'
+# findings go straight to the writer.
+[critic]
+effort = "medium"
+max_tokens = 16000
+
+[setups.sonnet-code-feedback]
+writer = "sonnet-k20"
+critic = "none"
+code_feedback = true
+
+[setups.haiku-code-feedback]
+writer = "haiku-k5"
+critic = "none"
+code_feedback = true
+
+[setups.sonnet-self-critique]
+writer = "sonnet-k20"
+critic = "claude-sonnet-5-5"
+code_feedback = false
+
+[setups.haiku-self-critique]
+writer = "haiku-k5"
+critic = "claude-haiku-5-5"
+code_feedback = false
+
+[setups.haiku-sonnet-critic]
+writer = "haiku-k5"
+critic = "claude-sonnet-5-5"
+code_feedback = false
+
+[setups.haiku-sonnet-critic-checks]
+writer = "haiku-k5"
+critic = "claude-sonnet-5-5"
+code_feedback = true

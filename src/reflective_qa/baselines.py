@@ -17,7 +17,7 @@ import time
 import tomllib
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from reflective_qa.answering import (ANSWER_SCHEMA, CONFIG, SYSTEM, Answer, RunConfig, build_request, load_runs,
                                      parse_message)
@@ -78,12 +78,11 @@ def read_answers(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
 
-def run_batch(client: Any, run: RunConfig, requests: dict[str, dict], costs: Costs, out_dir: Path = RUNS_DIR,
-              poll_seconds: float = 30) -> Path:
-    """Answers go to the run's JSON lines file, in the shape `scoring.load_predictions` reads. Only succeeded
-    results are written, so errored or expired requests are retried on the next run."""
-    out_dir.mkdir(parents=True, exist_ok=True)
-    answers_path, batch_path = run_paths(run, out_dir)
+def submit_and_collect(client: Any, requests: dict[str, dict], answers_path: Path, batch_path: Path,
+                       record: Callable[[str, Any], dict], poll_seconds: float = 30) -> Path:
+    """Batch the requests not yet in `answers_path`, wait, and append `record(custom_id, message)` for each succeeded
+    result. Only succeeded results are written, so errored or expired requests are retried on the next call."""
+    answers_path.parent.mkdir(parents=True, exist_ok=True)
     done = {row["question_id"] for row in read_answers(answers_path)}
     if batch_path.exists():
         batch_id = batch_path.read_text().strip()
@@ -101,10 +100,18 @@ def run_batch(client: Any, run: RunConfig, requests: dict[str, dict], costs: Cos
         for result in client.messages.batches.results(batch_id):
             if result.result.type != "succeeded" or result.custom_id in done:
                 continue
-            out.write(json.dumps(_record(parse_message(result.custom_id, result.result.message), run, costs)) + "\n")
+            out.write(json.dumps(record(result.custom_id, result.result.message)) + "\n")
             done.add(result.custom_id)
     batch_path.unlink()
     return answers_path
+
+
+def run_batch(client: Any, run: RunConfig, requests: dict[str, dict], costs: Costs, out_dir: Path = RUNS_DIR,
+              poll_seconds: float = 30) -> Path:
+    """Answers go to the run's JSON lines file, in the shape `scoring.load_predictions` reads."""
+    answers_path, batch_path = run_paths(run, out_dir)
+    return submit_and_collect(client, requests, answers_path, batch_path,
+                              lambda qid, message: _record(parse_message(qid, message), run, costs), poll_seconds)
 
 
 def _record(answer: Answer, run: RunConfig, costs: Costs) -> dict:
