@@ -55,10 +55,15 @@ def load_runs(path: Path = CONFIG) -> dict[str, RunConfig]:
     return {name: RunConfig(name=name, max_tokens=config["max_tokens"], **run) for name, run in config["runs"].items()}
 
 
+def passages_block(passages: list[Paragraph]) -> str:
+    """Paragraphs as the writer and the critic see them: each labeled with its ID."""
+    return "Passages:\n" + "\n\n".join(f"[{p.id}] {passage_text(p)}" for p in passages)
+
+
 def build_request(run: RunConfig, paper: Paper, question: Question, passages: list[Paragraph]) -> dict[str, Any]:
     """Messages API parameters; the same dict works for a direct call and for a Batch API request."""
     if passages:
-        context = "Passages:\n" + "\n\n".join(f"[{p.id}] {passage_text(p)}" for p in passages)
+        context = passages_block(passages)
     else:
         context = "No passages are given. Give your best guess from what you know about this paper."
     return {
