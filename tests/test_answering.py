@@ -36,6 +36,11 @@ def test_reply_parses_to_answer_and_citations_as_written():
     assert answer == Answer("q1", "claude-haiku-5-5", "Foo", ("s1p0", "s9p9"), "ok", 1200, 80)
 
 
+def test_cited_ids_lose_brackets_copied_from_the_passage_labels():
+    answer = parse_message("q1", _reply('{"answer": "Foo", "evidence": ["[s1p0]", " [s2p3] ", "s4p1"]}'))
+    assert answer.evidence_ids == ("s1p0", "s2p3", "s4p1")
+
+
 def test_refusal_truncation_and_bad_json_give_an_empty_answer_with_the_reason():
     assert parse_message("q", _reply("", "refusal")).status == "refusal"
     assert parse_message("q", _reply('{"answer": "Fo', "max_tokens")).status == "max_tokens"

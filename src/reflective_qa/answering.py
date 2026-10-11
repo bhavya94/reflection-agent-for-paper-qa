@@ -17,8 +17,8 @@ SYSTEM = """You answer questions about one scientific paper.
 - When passages are given, use only them. Each passage starts with its ID in brackets, for example [s3p0].
   If they do not contain the answer, answer exactly "Unanswerable".
 - When no passages are given, give your best guess from what you know about the paper.
-- In "evidence", list the IDs of the passages that support the answer. List none if no passages are given or the
-  answer is "Unanswerable"."""
+- In "evidence", list the IDs of the passages that support the answer, without brackets: s3p0, not [s3p0].
+  List none if no passages are given or the answer is "Unanswerable"."""
 
 ANSWER_SCHEMA = {
     "type": "object",
@@ -71,13 +71,15 @@ def build_request(run: RunConfig, paper: Paper, question: Question, passages: li
 
 
 def parse_message(question_id: str, message: Any) -> Answer:
-    """Citations are kept as the model wrote them; scoring treats an ID that wasn't retrieved as a wrong citation."""
+    """Cited IDs lose any brackets or spaces around them; an ID that wasn't retrieved is kept, and scoring counts it
+    as a wrong citation."""
     usage = (message.usage.input_tokens, message.usage.output_tokens)
     if message.stop_reason in ("refusal", "max_tokens"):
         return Answer(question_id, message.model, "", (), message.stop_reason, *usage)
     text = next((block.text for block in message.content if block.type == "text"), "")
     try:
         reply = json.loads(text)
-        return Answer(question_id, message.model, reply["answer"], tuple(reply["evidence"]), "ok", *usage)
+        evidence = tuple(str(cited).strip().strip("[]").strip() for cited in reply["evidence"])
+        return Answer(question_id, message.model, reply["answer"], evidence, "ok", *usage)
     except (json.JSONDecodeError, KeyError, TypeError):
         return Answer(question_id, message.model, "", (), "invalid_json", *usage)
