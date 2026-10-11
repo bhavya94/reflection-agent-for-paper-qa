@@ -19,10 +19,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def render(data: dict, template: str) -> str:
-    """Embed the data in the page; "</" is escaped so text like "</script>" in an answer can't end the script."""
+    """Embed the data in the page. Every "<" is escaped, so text like "</script>" or "<!--" in an answer can't change
+    where the script ends."""
     if template.count("__DATA__") != 1:
         raise ValueError("the template needs exactly one __DATA__ placeholder")
-    return template.replace("__DATA__", json.dumps(data).replace("</", "<\\/"))
+    return template.replace("__DATA__", json.dumps(data).replace("<", "\\u003c"))
 
 
 def main() -> None:
