@@ -4,6 +4,7 @@ the flagged drafts once. Each setup's files are named with a fingerprint of ever
 import argparse
 import hashlib
 import json
+import random
 import statistics
 import tomllib
 from dataclasses import asdict, dataclass
@@ -17,7 +18,7 @@ from reflective_qa.checks import CONFIG, Finding, load_max_words, run_checks
 from reflective_qa.critic import CriticConfig, build_critic_request, parse_critique
 from reflective_qa.data import Paper, Paragraph, Question, load_split, text_only_questions
 from reflective_qa.retrieval import PaperRetriever
-from reflective_qa.scoring import Prediction, answer_f1, score
+from reflective_qa.scoring import Prediction, answer_f1, is_unanswerable, score
 
 # The answer rules are repeated because the 20-question pilot showed revisions drifting long and hedged
 # ("Yes, partly: ..."), which the writer's system prompt alone did not prevent.
@@ -183,6 +184,26 @@ def report(papers: list[Paper], contexts: dict[str, Context], critiques: dict[st
                      "worse": sum(d < 0 for d in delta.values()), "cost": sum(row["cost"] for row in final.values())}
 
 
+def analyze(contexts: dict[str, Context], final: dict[str, dict], resamples: int, seed: int) -> dict:
+    """How reflection moved answer-F1: the mean change per question with a paired-bootstrap 95% interval, and the
+    changed answers split by kind: an abstention turned into an answer, an answer turned into an abstention, or a
+    rewording."""
+    deltas = {q: answer_f1(c.question, final[q]["predicted_answer"])[0] - answer_f1(c.question, c.draft["predicted_answer"])[0]
+              for q, c in contexts.items()}
+    rng, values = random.Random(seed), list(deltas.values())
+    means = sorted(statistics.mean(rng.choices(values, k=len(values))) for _ in range(resamples))
+    kinds: dict[str, list[float]] = {"abstain_to_answer": [], "answer_to_abstain": [], "reworded": []}
+    for q, c in contexts.items():
+        before, after = c.draft["predicted_answer"], final[q]["predicted_answer"]
+        if before == after:
+            continue
+        kind = ("abstain_to_answer" if is_unanswerable(before) and not is_unanswerable(after) else
+                "answer_to_abstain" if is_unanswerable(after) and not is_unanswerable(before) else "reworded")
+        kinds[kind].append(deltas[q])
+    return {"delta": statistics.mean(values), "ci": (means[int(0.025 * resamples)], means[int(0.975 * resamples) - 1]),
+            "kinds": {k: {"n": len(v), "mean_delta": statistics.mean(v) if v else 0.0} for k, v in kinds.items()}}
+
+
 def _mean_output(rows: list[dict], default: float) -> float:
     return statistics.mean(r["output_tokens"] for r in rows) if rows else default
 
@@ -241,6 +262,7 @@ def main() -> None:
         raise SystemExit("run needs --max-dollars")
     sample = tomllib.loads(ANSWERING.read_text())["sample"]
     papers, costs, runs, max_words = load_split(args.dev), load_costs(), load_runs(), load_max_words()
+    analysis = tomllib.loads(CONFIG.read_text())["analysis"]
     client = None
     if args.command != "report":
         import anthropic
@@ -262,12 +284,16 @@ def main() -> None:
             print(f"{name}: done; run `report` to score it")
         else:
             r = report(papers, contexts, critiques, revisions)
+            a = analyze(contexts, final_answers(contexts, critiques, revisions), analysis["bootstrap_resamples"], analysis["seed"])
             ran = r["critiques"] or r["revisions"] or (setup.critic is None and not revise_requests(setup, writer, contexts, {}))
             status = (f"critic: {r['critiques']} reviews ({r['critic_revise']} revise, {r['critic_errors']} errors)  "
                       f"revisions: {r['revisions']} ({r['revision_failures']} failed), {r['changed']} changed: answer-F1 "
                       f"better {r['better']}, worse {r['worse']}") if ran else "not run yet"
             print(f"{name:28} answer-F1 {r['draft_answer_f1']:.3f} -> {r['answer_f1']:.3f}  evidence-F1 "
                   f"{r['evidence_f1']:.3f}  unanswerable {r['predicted_unanswerable']:.1%}  ${r['cost']:.2f}\n{'':30}{status}")
+            if ran:
+                kinds = "  ".join(f"{k.replace('_', ' ')} {v['n']} ({v['mean_delta']:+.3f})" for k, v in a["kinds"].items())
+                print(f"{'':30}change {a['delta']:+.3f}, 95% CI [{a['ci'][0]:+.3f}, {a['ci'][1]:+.3f}]  {kinds}")
 
 
 if __name__ == "__main__":

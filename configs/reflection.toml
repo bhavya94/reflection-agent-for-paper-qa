@@ -42,3 +42,8 @@ code_feedback = false
 writer = "haiku-k5"
 critic = "claude-sonnet-5-5"
 code_feedback = true
+
+# Uncertainty of each setup's change in answer-F1: a paired bootstrap over the sampled questions.
+[analysis]
+bootstrap_resamples = 5000
+seed = 0
