@@ -1,0 +1,112 @@
+import json
+from dataclasses import replace
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from reflective_qa.answering import RunConfig
+from reflective_qa.baselines import Costs, build_requests, estimate, read_answers, run_batch, run_paths
+from reflective_qa.data import load_split
+
+FIXTURE = Path(__file__).parent / "fixtures" / "mini_qasper.json"
+RUN = RunConfig(name="test", model="m", k=2, effort="low", max_tokens=100)
+COSTS = Costs(prices={"m": {"input": 2.0, "output": 10.0}}, batch_discount=0.5, assumed_output_tokens=500)
+
+
+def _message(answer: str):
+    return SimpleNamespace(content=[SimpleNamespace(type="text", text=json.dumps({"answer": answer, "evidence": []}))],
+                           model="m", stop_reason="end_turn", usage=SimpleNamespace(input_tokens=1000, output_tokens=100))
+
+
+class FakeClient:
+    """Batch API stand-in: every request succeeds except IDs in `fail`; `interrupt` makes the first poll raise."""
+
+    def __init__(self, fail=(), interrupt=False):
+        self.created, self.fail, self.batches, self.interrupt, self.retries_off = [], set(fail), {}, interrupt, False
+        self.messages = SimpleNamespace(
+            batches=SimpleNamespace(create=self._create, retrieve=self._retrieve, results=self._results),
+            count_tokens=self._count_tokens)
+
+    def with_options(self, **options):
+        self.retries_off = options == {"max_retries": 0}
+        return self
+
+    def _count_tokens(self, *, model, system, messages, output_config):  # the real endpoint rejects max_tokens
+        return SimpleNamespace(input_tokens=1000)
+
+    def _create(self, requests):
+        assert self.retries_off, "a retried create could submit a second paid batch"
+        self.retries_off = False
+        batch_id = f"batch_{len(self.created) + 1}"
+        self.created.append([r["custom_id"] for r in requests])
+        self.batches[batch_id] = [r["custom_id"] for r in requests]
+        return SimpleNamespace(id=batch_id)
+
+    def _retrieve(self, batch_id):
+        if self.interrupt:
+            self.interrupt = False
+            raise KeyboardInterrupt
+        return SimpleNamespace(processing_status="ended")
+
+    def _results(self, batch_id):
+        for qid in self.batches[batch_id]:
+            kind = "errored" if qid in self.fail else "succeeded"
+            yield SimpleNamespace(custom_id=qid, result=SimpleNamespace(type=kind, message=_message("Foo")))
+
+
+def _requests(run=RUN, n=None):
+    return build_requests(run, load_split(FIXTURE), n)
+
+
+def _ids(path):
+    return [r["question_id"] for r in read_answers(path)]
+
+
+def test_samples_are_seeded_and_smaller_samples_are_prefixes_of_larger_ones():
+    assert list(_requests(n=3))[:2] == list(_requests(n=2))
+    assert sorted(_requests()) == ["q-abstractive", "q-boolean", "q-extractive"]
+
+
+def test_only_unanswered_questions_are_submitted_and_failures_stay_pending(tmp_path):
+    client = FakeClient(fail={"q-boolean"})
+    path = run_batch(client, RUN, _requests(), COSTS, tmp_path, poll_seconds=0)
+    assert sorted(_ids(path)) == ["q-abstractive", "q-extractive"]
+    run_batch(client, RUN, _requests(), COSTS, tmp_path, poll_seconds=0)
+    assert client.created[1] == ["q-boolean"]
+
+
+def test_an_interrupted_run_resumes_its_saved_batch_without_paying_again(tmp_path):
+    client = FakeClient(interrupt=True)
+    with pytest.raises(KeyboardInterrupt):
+        run_batch(client, RUN, _requests(), COSTS, tmp_path, poll_seconds=0)
+    assert run_paths(RUN, tmp_path)[1].exists()  # batch ID saved before waiting
+    path = run_batch(client, RUN, _requests(), COSTS, tmp_path, poll_seconds=0)
+    assert len(client.created) == 1 and sorted(_ids(path)) == sorted(_requests())
+
+
+def test_resuming_never_writes_a_question_twice(tmp_path):
+    client = FakeClient()
+    client.batches["batch_saved"] = list(_requests())  # the saved batch also holds an answered question
+    answers, batch = run_paths(RUN, tmp_path)
+    answers.write_text(json.dumps({"question_id": "q-extractive", "cost": 0}) + "\n")
+    batch.write_text("batch_saved")
+    run_batch(client, RUN, _requests(), COSTS, tmp_path, poll_seconds=0)
+    assert sorted(_ids(answers)) == sorted(_requests())
+
+
+def test_a_changed_config_starts_a_new_file_instead_of_mixing_answers(tmp_path):
+    client = FakeClient()
+    first = run_batch(client, RUN, _requests(), COSTS, tmp_path, poll_seconds=0)
+    changed = replace(RUN, effort="high")
+    second = run_batch(client, changed, _requests(changed), COSTS, tmp_path, poll_seconds=0)
+    assert first != second and len(client.created) == 2 and len(_ids(first)) == len(_ids(second)) == 3
+
+
+def test_each_answer_records_its_cost_and_estimates_switch_to_measured_output(tmp_path):
+    before = estimate(FakeClient(), RUN, _requests(), COSTS, out_dir=tmp_path)
+    assert before["output_tokens"] == 500 and before["dollars"] == (3 * 1000 * 2.0 + 3 * 500 * 10.0) / 1e6 * 0.5
+    path = run_batch(FakeClient(), RUN, _requests(), COSTS, tmp_path, poll_seconds=0)
+    assert read_answers(path)[0]["cost"] == (1000 * 2.0 + 100 * 10.0) / 1e6 * 0.5
+    after = estimate(FakeClient(), RUN, _requests(), COSTS, out_dir=tmp_path)
+    assert after["output_tokens"] == 100 and after["output_measured"]
