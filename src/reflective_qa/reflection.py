@@ -15,8 +15,12 @@ from reflective_qa.critic import CriticConfig, build_critic_request
 from reflective_qa.data import Paper, Paragraph, Question, text_only_questions
 from reflective_qa.retrieval import PaperRetriever
 
+# The answer rules are repeated because the 20-question pilot showed revisions drifting long and hedged
+# ("Yes, partly: ..."), which the writer's system prompt alone did not prevent.
 REVISE_INSTRUCTION = ("A reviewer found these problems with your draft. Fix them and answer again in the same format. "
-                      "If a problem is wrong, keep that part of the draft.")
+                      "Keep the same rules: the shortest phrase that answers the question, Yes or No for a yes/no "
+                      "question, and Unanswerable only if the passages do not contain the answer. If a problem is "
+                      "wrong, keep that part of the draft.")
 
 
 @dataclass(frozen=True)

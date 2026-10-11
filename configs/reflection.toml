@@ -36,6 +36,8 @@ writer = "haiku-k5"
 critic = "claude-sonnet-5-5"
 code_feedback = false
 
+# Near-replicate of haiku-sonnet-critic: the checks flag almost no Haiku drafts, so the two differ only by a
+# "none flagged" line. Their gap measures run-to-run noise more than the effect of code feedback.
 [setups.haiku-sonnet-critic-checks]
 writer = "haiku-k5"
 critic = "claude-sonnet-5-5"
