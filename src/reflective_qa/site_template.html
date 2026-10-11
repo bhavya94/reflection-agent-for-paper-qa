@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reflective QA Results</title>
+<meta name="description" content="Does a review step make an AI agent answer questions about research papers better? An experiment with Claude on 200 QASPER questions.">
+<style>
+  :root { color-scheme: light; --page:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink-2:#52514e; --muted:#898781;
+    --grid:#e1e0d9; --axis:#c3c2b7; --ring:rgba(11,11,11,.10); --band:rgba(11,11,11,.06);
+    --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --point:#0b0b0b; }
+  @media (prefers-color-scheme: dark) { :root:where(:not([data-theme="light"])) { color-scheme: dark; --page:#0d0d0d;
+    --surface:#1a1a19; --ink:#f0efec; --ink-2:#c3c2b7; --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,.10);
+    --band:rgba(255,255,255,.07); --s1:#3987e5; --s2:#d95926; --s3:#199e70; --point:#f0efec; } }
+  :root[data-theme="dark"] { color-scheme: dark; --page:#0d0d0d; --surface:#1a1a19; --ink:#f0efec; --ink-2:#c3c2b7;
+    --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,.10); --band:rgba(255,255,255,.07); --s1:#3987e5;
+    --s2:#d95926; --s3:#199e70; --point:#f0efec; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 30px; line-height: 1.2; margin: 0 0 10px; } h2 { font-size: 22px; margin: 52px 0 6px; } h3 { font-size: 16px; margin: 28px 0 6px; }
+  p, li { color: var(--ink-2); max-width: 74ch; } .lede { font-size: 18px; color: var(--ink); } a { color: var(--s1); } b { color: var(--ink); }
+  .eyebrow { font-size: 13px; color: var(--muted); margin: 0 0 6px; } nav { font-size: 14px; display: flex; flex-wrap: wrap; gap: 6px 16px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 16px 0; }
+  .tile, .card { background: var(--surface); border: 1px solid var(--ring); border-radius: 12px; padding: 16px; }
+  .tile .label { font-size: 13px; color: var(--ink-2); } .tile .value { font-size: 30px; font-weight: 600; margin: 2px 0; }
+  .tile .note, .meta { font-size: 13px; color: var(--muted); }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; } th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+  th { color: var(--ink-2); font-weight: 600; } .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .scroll { overflow-x: auto; } details { margin-top: 8px; font-size: 14px; color: var(--ink-2); }
+  svg text { fill: var(--muted); font-size: 12px; } svg .label { fill: var(--ink-2); font-size: 13px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 8px 0; font-size: 13px; color: var(--ink-2); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; } .key { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+  .q { color: var(--ink); margin: 6px 0; } .kind { font-size: 13px; font-weight: 600; }
+  .ans { font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--ink); background: var(--band); border-radius: 6px; padding: 6px 8px; margin: 4px 0; }
+  .steps { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); } .step .n { display: inline-flex; width: 24px; height: 24px; border-radius: 50%; background: var(--ink); color: var(--surface);
+    font-size: 13px; align-items: center; justify-content: center; margin-right: 8px; } .step p { margin: 6px 0 0; font-size: 14px; }
+  #tip { position: fixed; pointer-events: none; background: var(--surface); color: var(--ink); border: 1px solid var(--ring); border-radius: 8px;
+    padding: 6px 10px; font-size: 13px; box-shadow: 0 4px 16px rgba(0,0,0,.12); display: none; z-index: 10; max-width: 300px; }
+  footer { margin-top: 48px; font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">An experiment with Claude agents · 200 questions about research papers</p>
+  <h1>Does a review step make an AI agent answer research questions better?</h1>
+  <p class="lede">Not on average. A reviewer checks the agent's answer, and the agent revises it once. The reviewer fixes
+    answers where the agent gave up too early. It also rewrites good answers into worse ones. The two effects cancel.</p>
+  <nav><a href="#task">The task</a><a href="#agent">The agent</a><a href="#scores">How we score</a><a href="#results">Results</a><a href="#all">All scores</a></nav>
+
+  <h2 id="task">The task</h2>
+  <p>A person asks a question about one research paper. The AI must answer from the paper's text, and name the paragraphs
+    that support its answer. If the paper does not contain the answer, the correct reply is “Unanswerable”.</p>
+  <p>The questions come from <a href="https://allenai.org/data/qasper">QASPER</a>, a public dataset of questions about
+    natural language processing (NLP) papers. Experts read each full paper and wrote the reference answers. Some
+    questions have two or more expert answers, and the experts don't always agree. We use <b id="n-questions"></b>
+    questions, picked at random from the dataset's development split. 14.5% of them have an expert who answered “Unanswerable”.</p>
+  <div class="card" id="task-example"></div>
+
+  <h2 id="agent">The agent</h2>
+  <p>The agent has a writer model and a review step. It runs four steps for each question:</p>
+  <div class="grid steps">
+    <div class="card step"><b><span class="n">1</span>Search</b><p>Keyword search (BM25) picks the paragraphs that best match
+      the question. The larger model gets 20 paragraphs. The smaller model gets 5.</p></div>
+    <div class="card step"><b><span class="n">2</span>Answer</b><p>The writer model gives a short answer and the IDs of the
+      paragraphs it used.</p></div>
+    <div class="card step"><b><span class="n">3</span>Review</b><p>The review step checks the answer against the same
+      paragraphs. It lists problems, or passes the answer.</p></div>
+    <div class="card step"><b><span class="n">4</span>Revise once</b><p>If the review found problems, the writer gets them and
+      answers again. If not, the first answer stays.</p></div>
+  </div>
+  <p>A reviewer model checks each answer for seven problems:</p>
+  <ul>
+    <li>It says “Unanswerable”, but the paragraphs contain the answer.</li>
+    <li>It gives an answer, but the paragraphs don't contain one.</li>
+    <li>It is wrong, or misses part of the question.</li>
+    <li>It makes a claim the cited paragraphs don't support.</li>
+    <li>It cites the wrong paragraphs.</li>
+    <li>It is longer than needed.</li>
+    <li>It doesn't answer a yes/no question with Yes or No.</li>
+  </ul>
+  <p>Free code checks catch some of these without a model: long answers, citation errors, and the yes/no format.</p>
+  <p>We tried six versions of the review step. Claude Sonnet 5.5 is the larger model. Claude Haiku 5.5 is smaller and
+    cheaper, and it gets fewer paragraphs, so its first answers have more to fix.</p>
+  <div class="card scroll"><table id="versions"></table></div>
+  <p>The last two versions are almost the same, because the code checks flag almost no Haiku answers. The gap between their
+    results shows how much the scores move by chance.</p>
+
+  <h2 id="scores">How we score</h2>
+  <p><b>Answer score (answer-F1).</b> A number from 0 to 1 for each answer. It measures how many words the answer shares with
+    the expert answer. Extra words lower it, and missing words lower it. Small words like “the” and punctuation don't count.
+    When experts disagree, the best match counts. We report the average over all questions.</p>
+  <div class="card" id="score-example"></div>
+  <p>So a correct answer in different words can score low. Use the scores to compare versions on the same questions.</p>
+  <p><b>Evidence score (evidence-F1).</b> The same idea for citations: the overlap between the paragraphs the AI cited and the
+    paragraphs the experts marked. <b>Says “Unanswerable”</b> is the share of questions where the AI gave up.</p>
+  <p><b>Change and 95% interval.</b> The change is the average answer score after review minus the average before, on the same
+    questions. To see how much of the change is luck, we resample the questions 5,000 times (a paired bootstrap). If the
+    interval includes zero, the data can't tell the change from chance.</p>
+
+  <h2 id="results">Results</h2>
+  <div class="tiles" id="tiles"></div>
+  <h3>Change in answer score after one review round</h3>
+  <p>Each dot is a version's change in the average answer score. The line is its 95% interval. Every interval includes
+    zero. The shaded band is the noise: differences inside it mean nothing. “Haiku · code checks” changed only one answer.</p>
+  <div class="card"><svg id="forest" viewBox="0 0 760 300" width="100%" role="img" aria-label="Change in answer score per version with 95% intervals"></svg>
+    <details><summary>Table view</summary><div class="scroll"><table id="forest-table"></table></div></details></div>
+  <h3>Where the change comes from</h3>
+  <p>A review can change an answer in three ways. In all four versions with a reviewer model, fixing a wrong “Unanswerable”
+    raised the score. Rewording an answer lowered it in three of those four. A new “Unanswerable” always lowered it. Code
+    checks only shortened answers, which raised the score a little. The parts add up to the total change, shown by the tick.</p>
+  <div class="legend" id="legend"></div>
+  <div class="card"><svg id="decomp" viewBox="0 0 760 300" width="100%" role="img" aria-label="Part of the change from each kind of revision"></svg>
+    <details><summary>Table view</summary><div class="scroll"><table id="decomp-table"></table></div></details></div>
+  <h3>Real examples</h3>
+  <p>The largest change of each kind across all six versions.</p>
+  <div class="grid" id="examples"></div>
+
+  <h2 id="all">All scores</h2>
+  <p>Every version, on the same questions with the same scoring. New versions add rows here. Cost is for all the questions,
+    first answers included, at Batch API prices.</p>
+  <div class="card scroll"><table id="history"></table></div>
+
+  <h2>Limits</h2>
+  <ul>
+    <li>The answer score rewards shared words, so it can miss a correct answer in other words.</li>
+    <li>We changed the revise prompt after a 20-question pilot, and those 20 questions are part of the sample.</li>
+    <li>One review round, one dataset, two models.</li>
+  </ul>
+  <p><a href="https://github.com/bhavya94/reflective-qa">Code on GitHub</a> ·
+    <a href="https://github.com/bhavya94/agent-knowledge-base/blob/main/projects/reflective-qa/explainers/2026-10-11-m3-results.md">Detailed write-up</a></p>
+  <footer id="footer"></footer>
+</main>
+<div id="tip" aria-hidden="true"></div>
+<script>
+const DATA = __DATA__;
+const el = (tag, attrs = {}, text) => { const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); if (text !== undefined) n.textContent = text; return n; };
+const NS = "http://www.w3.org/2000/svg";
+const s = (tag, attrs, text) => { const n = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); if (text !== undefined) n.textContent = text; return n; };
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const f3 = (x) => (x >= 0 ? "+" : "−") + Math.abs(x).toFixed(3);
+const usd = (x) => "$" + x.toFixed(2);
+const tip = document.getElementById("tip");
+const showTip = (e, lines) => { tip.replaceChildren(...lines.map((t) => el("div", {}, t))); tip.style.display = "block";
+  tip.style.left = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8) + "px"; tip.style.top = (e.clientY + 14) + "px"; };
+const hideTip = () => { tip.style.display = "none"; };
+const NAMES = { "sonnet-code-feedback": "Sonnet · code checks", "haiku-code-feedback": "Haiku · code checks",
+  "sonnet-self-critique": "Sonnet · self-review", "haiku-self-critique": "Haiku · self-review",
+  "haiku-sonnet-critic": "Haiku · Sonnet reviews", "haiku-sonnet-critic-checks": "Haiku · Sonnet reviews + checks",
+  "sonnet-k20": "Sonnet 5.5 · 20 paragraphs", "sonnet-closed-book": "Sonnet 5.5 · no paragraphs (from memory)", "haiku-k5": "Haiku 5.5 · 5 paragraphs" };
+const name = (n) => NAMES[n] || n;
+const MODELS = { "claude-sonnet-5-5": "Sonnet 5.5", "claude-haiku-5-5": "Haiku 5.5" };
+const model = (m) => MODELS[m] || m;
+const run = Object.fromEntries(DATA.baselines.map((b) => [b.name, b]));
+const layout = (svg) => (svg.parentElement.clientWidth < 560 ? { W: 400, L: 8, rowH: 52, narrow: true } : { W: 760, L: 230, rowH: 40, narrow: false });
+const rowLabel = (n, x, y, narrow) => s("text", narrow ? { x, y, class: "label" } : { x: x - 12, y, "text-anchor": "end", class: "label" }, n);
+const KINDS = [["abstain_to_answer", "--s1"], ["reworded", "--s2"], ["answer_to_abstain", "--s3"]];
+const quoted = (xs) => xs.map((g) => "“" + g + "”").join(", ");
+const table = (id, header, rows, textColumns = 2) => { const t = document.getElementById(id), head = el("tr"), cls = (i) => (i < textColumns ? {} : { class: "num" });
+  t.replaceChildren(); header.forEach((h, i) => head.append(el("th", cls(i), h))); t.append(head);
+  for (const row of rows) { const tr = el("tr"); row.forEach((c, i) => tr.append(el("td", cls(i), c))); t.append(tr); } };
+
+document.getElementById("n-questions").textContent = DATA.questions;
+const ex = DATA.examples.shortened;
+if (ex) {
+  document.getElementById("task-example").append(el("div", { class: "meta" }, "A real question from the sample"),
+    el("div", { class: "q" }, `“${ex.question}”`), el("div", { class: "meta" }, `Expert answers: ${quoted(ex.gold)}`));
+  document.getElementById("score-example").append(el("div", { class: "meta" }, `Same question. Expert answers: ${quoted(ex.gold)}`),
+    el("div", { class: "ans" }, ex.before), el("div", { class: "meta" }, `First answer: score ${ex.f1[0].toFixed(2)}. Extra words lower the score.`),
+    el("div", { class: "ans" }, ex.after), el("div", { class: "meta" }, `After review: score ${ex.f1[1].toFixed(2)}. Shorter, and closer to the experts' words.`));
+}
+table("versions", ["Version", "Writer", "Who reviews", "Reviewer sees code checks"], DATA.setups.map((r) => [name(r.name),
+  model(run[r.writer].model), r.critic ? (r.critic === run[r.writer].model ? "The writer itself" : model(r.critic)) : "No model: code checks only",
+  r.critic ? (r.code_feedback ? "Yes" : "No") : "—"]), 4);
+
+const best = DATA.baselines.reduce((a, b) => (b.answer_f1 > a.answer_f1 ? b : a));
+const biggest = DATA.setups.reduce((a, b) => (b.delta > a.delta ? b : a));
+for (const [label, value, note] of [
+  ["Best average answer score without review", best.answer_f1.toFixed(3), name(best.name)],
+  ["Largest change from review", f3(biggest.delta), `${name(biggest.name)} · 95% interval ${f3(biggest.ci[0])} to ${f3(biggest.ci[1])}`],
+  ["Noise", DATA.noise.gap.toFixed(3), "gap between the two nearly identical versions"],
+  ["API cost, whole project", usd(DATA.spent), "of a $20 budget, Batch API"]]) {
+  const t = el("div", { class: "tile" }); t.append(el("div", { class: "label" }, label), el("div", { class: "value" }, value), el("div", { class: "note" }, note));
+  document.getElementById("tiles").append(t);
+}
+
+function forest() {
+  const svg = document.getElementById("forest"), { W, L, rowH, narrow } = layout(svg), R = 30, T = 16, rows = DATA.setups;
+  const H = T + rows.length * rowH + 34; svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.replaceChildren();
+  const lim = Math.max(0.05, ...rows.flatMap((r) => r.ci.map(Math.abs))) * 1.1;
+  const x = (v) => L + (v + lim) / (2 * lim) * (W - L - R);
+  svg.append(s("rect", { x: x(-DATA.noise.gap), y: T - 6, width: x(DATA.noise.gap) - x(-DATA.noise.gap), height: rows.length * rowH + 6, fill: css("--band") }));
+  for (const v of [-0.04, -0.02, 0, 0.02, 0.04].filter((v) => Math.abs(v) <= lim)) {
+    svg.append(s("line", { x1: x(v), x2: x(v), y1: T - 6, y2: T + rows.length * rowH, stroke: v === 0 ? css("--axis") : css("--grid"), "stroke-width": v === 0 ? 1.5 : 1 }));
+    svg.append(s("text", { x: x(v), y: H - 12, "text-anchor": "middle" }, f3(v)));
+  }
+  rows.forEach((r, i) => {
+    const y = T + i * rowH + rowH / 2;
+    svg.append(rowLabel(name(r.name), L, narrow ? y - 12 : y + 4, narrow));
+    svg.append(s("line", { x1: x(r.ci[0]), x2: x(r.ci[1]), y1: y, y2: y, stroke: css("--point"), "stroke-width": 2, "stroke-linecap": "round" }));
+    svg.append(s("circle", { cx: x(r.delta), cy: y, r: 5, fill: css("--point"), stroke: css("--surface"), "stroke-width": 2 }));
+    const hit = s("rect", { x: L, y: y - rowH / 2, width: W - L - R, height: rowH, fill: "transparent" });
+    hit.addEventListener("pointermove", (e) => showTip(e, [`${name(r.name)}`, `Change ${f3(r.delta)} (95% interval ${f3(r.ci[0])} to ${f3(r.ci[1])})`,
+      `Answer score ${r.before.toFixed(3)} → ${r.after.toFixed(3)}`, `${r.revised} answers changed: ${r.better} better, ${r.worse} worse`]));
+    hit.addEventListener("pointerleave", hideTip); svg.append(hit);
+  });
+  table("forest-table", ["Version", "Answer score before → after", "Change", "95% interval", "Answers changed (better / worse)"],
+    rows.map((r) => [name(r.name), `${r.before.toFixed(3)} → ${r.after.toFixed(3)}`, f3(r.delta), `${f3(r.ci[0])} to ${f3(r.ci[1])}`, `${r.revised} (${r.better} / ${r.worse})`]));
+}
+
+function decomposition() {
+  const legend = document.getElementById("legend"); legend.replaceChildren();
+  for (const [kind, color] of KINDS) {
+    const k = el("span"), key = el("span", { class: "key" }); key.style.background = `var(${color})`;
+    k.append(key, document.createTextNode(DATA.setups[0].kinds[kind].label)); legend.append(k);
+  }
+  const svg = document.getElementById("decomp"), { W, L, rowH, narrow } = layout(svg), R = 30, T = 10, rows = DATA.setups;
+  const H = T + rows.length * rowH + 34; svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.replaceChildren();
+  const extent = Math.max(0.02, ...rows.map((r) => Math.max(
+    Object.values(r.contributions).filter((v) => v > 0).reduce((a, b) => a + b, 0),
+    -Object.values(r.contributions).filter((v) => v < 0).reduce((a, b) => a + b, 0)))) * 1.15;
+  const x = (v) => L + (v + extent) / (2 * extent) * (W - L - R);
+  for (const v of [-0.02, -0.01, 0, 0.01, 0.02].filter((v) => Math.abs(v) <= extent)) {
+    svg.append(s("line", { x1: x(v), x2: x(v), y1: T, y2: T + rows.length * rowH, stroke: v === 0 ? css("--axis") : css("--grid"), "stroke-width": v === 0 ? 1.5 : 1 }));
+    svg.append(s("text", { x: x(v), y: H - 12, "text-anchor": "middle" }, f3(v)));
+  }
+  rows.forEach((r, i) => {
+    const y = T + i * rowH + (narrow ? 22 : 10), h = 20;
+    svg.append(rowLabel(name(r.name), L, narrow ? y - 6 : y + 14, narrow));
+    let pos = 0, neg = 0;
+    for (const [kind, color] of KINDS) {
+      const v = r.contributions[kind]; if (!v) continue;
+      const start = v > 0 ? pos : neg + v; v > 0 ? (pos += v) : (neg += v);
+      const rect = s("rect", { x: x(start) + (v > 0 ? 1 : 0), y, width: Math.max(1, x(start + Math.abs(v)) - x(start) - 1), height: h, fill: css(color), rx: 2 });
+      rect.addEventListener("pointermove", (e) => showTip(e, [`${name(r.name)}: ${r.kinds[kind].label}`,
+        `${r.kinds[kind].n} answers, mean ${f3(r.kinds[kind].mean_delta)} each`, `Adds ${f3(v)} to the total`]));
+      rect.addEventListener("pointerleave", hideTip); svg.append(rect);
+    }
+    svg.append(s("line", { x1: x(r.delta), x2: x(r.delta), y1: y - 4, y2: y + h + 4, stroke: css("--point"), "stroke-width": 3 }));
+  });
+  table("decomp-table", ["Version", ...KINDS.map(([k]) => DATA.setups[0].kinds[k].label), "Total change"], rows.map((r) => [name(r.name),
+    ...KINDS.map(([k]) => `${r.kinds[k].n} × ${f3(r.kinds[k].mean_delta)} = ${f3(r.contributions[k])}`), f3(r.delta)]));
+}
+
+function examples() {
+  const box = document.getElementById("examples");
+  const titles = { abstain_to_answer: "Fixed a wrong “Unanswerable”", reworded: "Reworded a good answer into a worse one", shortened: "Shortened a long answer" };
+  for (const kind of ["abstain_to_answer", "shortened", "reworded"]) {
+    const e = DATA.examples[kind]; if (!e) continue;
+    const card = el("div", { class: "card" });
+    card.append(el("div", { class: "kind" }, `${titles[kind]} · answer score ${e.f1[0].toFixed(2)} → ${e.f1[1].toFixed(2)}`), el("div", { class: "q" }, `“${e.question}”`),
+      el("div", { class: "meta" }, "First answer"), el("div", { class: "ans" }, e.before),
+      el("div", { class: "meta" }, "After review"), el("div", { class: "ans" }, e.after),
+      el("div", { class: "meta" }, `Expert answers: ${quoted(e.gold)} · ${name(e.setup)}`));
+    box.append(card);
+  }
+}
+
+const pct = (x) => (x * 100).toFixed(1) + "%", ef = (x) => (x === null ? "—" : x.toFixed(3));
+table("history", ["Approach", "Version", "Answer score", "Evidence score", "Says “Unanswerable”", "Cost"], [
+  ...DATA.baselines.map((b) => ["Answer once", name(b.name), b.answer_f1.toFixed(3), ef(b.evidence_f1), pct(b.unanswerable), usd(b.cost)]),
+  ...DATA.setups.map((r) => ["Answer, review, revise once", name(r.name), r.after.toFixed(3), ef(r.evidence_f1), pct(r.unanswerable), usd(run[r.writer].cost + r.cost)])]);
+forest(); decomposition(); examples();
+document.getElementById("footer").textContent = `Generated ${DATA.generated} from commit ${DATA.commit}. Data: QASPER v0.3 dev split ` +
+  "(Dasigi et al., 2021; CC BY 4.0). Models: Claude Sonnet 5.5 and Claude Haiku 5.5 via the Anthropic Batch API.";
+const redraw = () => { forest(); decomposition(); };
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", redraw); addEventListener("resize", redraw);
+</script>
+</body>
+</html>
