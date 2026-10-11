@@ -9,7 +9,7 @@ from reflective_qa.baselines import Costs, answer_record, read_answers, run_path
 from reflective_qa.critic import SYSTEM as CRITIC_SYSTEM, CriticConfig
 from reflective_qa.data import load_split
 from reflective_qa.answering import build_request, parse_message
-from reflective_qa.reflection import (Setup, build_contexts, critic_requests, critique_record, estimate_setup,
+from reflective_qa.reflection import (Setup, analyze, build_contexts, critic_requests, critique_record, estimate_setup,
                                       final_answers, report, revise_request, revise_requests, run_setup)
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mini_qasper.json"
@@ -150,3 +150,23 @@ def test_revisions_keep_the_writer_prompt_and_schema_and_the_critic_sees_every_p
     assert {k: v for k, v in revised.items() if k != "messages"} == {k: v for k, v in original.items() if k != "messages"}
     prompt = critic_requests(SETUP, {"q": c})["q"]["messages"][0]["content"]
     assert all(f"[{p.id}]" in prompt for p in c.passages)
+
+
+def test_analysis_splits_changes_by_kind_and_brackets_the_mean_change(tmp_path):
+    papers, writer, contexts = _setup_drafts(tmp_path)  # every draft is "a tiny model with many words"
+    final = {q: {"predicted_answer": c.draft["predicted_answer"]} for q, c in contexts.items()}
+    contexts["q-boolean"].draft["predicted_answer"] = "Unanswerable"
+    final["q-boolean"] = {"predicted_answer": "No"}            # abstention turned into the right answer
+    final["q-abstractive"] = {"predicted_answer": "Unanswerable"}  # a right answer turned into an abstention
+    final["q-extractive"] = {"predicted_answer": "Foo"}        # reworded, and better
+    result = analyze(contexts, final, resamples=500, seed=0)
+    assert {k: v["n"] for k, v in result["kinds"].items()} == {"abstain_to_answer": 1, "answer_to_abstain": 1, "reworded": 1}
+    assert result["kinds"]["abstain_to_answer"]["mean_delta"] == 1.0
+    assert result["ci"][0] <= result["delta"] <= result["ci"][1]
+
+
+def test_unchanged_answers_are_not_counted_as_changes(tmp_path):
+    papers, writer, contexts = _setup_drafts(tmp_path)
+    final = {q: {"predicted_answer": c.draft["predicted_answer"]} for q, c in contexts.items()}
+    result = analyze(contexts, final, resamples=100, seed=0)
+    assert result["delta"] == 0.0 and all(v["n"] == 0 for v in result["kinds"].values())
