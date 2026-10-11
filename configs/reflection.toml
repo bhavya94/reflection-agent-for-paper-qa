@@ -47,3 +47,5 @@ code_feedback = true
 [analysis]
 bootstrap_resamples = 5000
 seed = 0
+# Two setups that see near-identical inputs; the gap between their results estimates run-to-run noise.
+replicate_pair = ["haiku-sonnet-critic", "haiku-sonnet-critic-checks"]

@@ -86,6 +86,11 @@ def stage_paths(setup: Setup, writer: RunConfig, max_words: int, out_dir: Path =
     return {stage: (out_dir / f"{stem}.{stage}.jsonl", out_dir / f"{stem}.{stage}.batch") for stage in ("critic", "revise")}
 
 
+def read_stage(paths: dict[str, tuple[Path, Path]], stage: str) -> dict[str, dict]:
+    """One stage's results on disk, keyed by question ID."""
+    return {r["question_id"]: r for r in read_answers(paths[stage][0])}
+
+
 def build_contexts(setup: Setup, papers: list[Paper], n: int, seed: int, max_words: int,
                    runs_dir: Path = RUNS_DIR) -> dict[str, Context]:
     writer = load_runs()[setup.writer]
@@ -150,6 +155,13 @@ def revise_requests(setup: Setup, writer: RunConfig, contexts: dict[str, Context
             if (found := problems(setup, c, critiques.get(qid)))}
 
 
+def has_run(setup: Setup, writer: RunConfig, contexts: dict[str, Context], critiques: dict[str, dict],
+            revisions: dict[str, dict]) -> bool:
+    """Whether the setup has results for these questions. Code feedback that flags no draft has nothing to run."""
+    return bool(set(contexts) & (set(critiques) | set(revisions))) or (
+        setup.critic is None and not revise_requests(setup, writer, contexts, {}))
+
+
 def final_answers(contexts: dict[str, Context], critiques: dict[str, dict], revisions: dict[str, dict]) -> dict[str, dict]:
     """The revision where one succeeded, else the draft; with the cost of reflecting, not of the draft."""
     final = {}
@@ -184,6 +196,12 @@ def report(papers: list[Paper], contexts: dict[str, Context], critiques: dict[st
                      "worse": sum(d < 0 for d in delta.values()), "cost": sum(row["cost"] for row in final.values())}
 
 
+def revision_kind(before: str, after: str) -> str:
+    """How an answer changed: an abstention turned into an answer, an answer turned into an abstention, or a rewording."""
+    return ("abstain_to_answer" if is_unanswerable(before) and not is_unanswerable(after) else
+            "answer_to_abstain" if is_unanswerable(after) and not is_unanswerable(before) else "reworded")
+
+
 def analyze(contexts: dict[str, Context], final: dict[str, dict], resamples: int, seed: int) -> dict:
     """How reflection moved answer-F1: the mean change per question with a paired-bootstrap 95% interval, and the
     changed answers split by kind: an abstention turned into an answer, an answer turned into an abstention, or a
@@ -197,9 +215,7 @@ def analyze(contexts: dict[str, Context], final: dict[str, dict], resamples: int
         before, after = c.draft["predicted_answer"], final[q]["predicted_answer"]
         if before == after:
             continue
-        kind = ("abstain_to_answer" if is_unanswerable(before) and not is_unanswerable(after) else
-                "answer_to_abstain" if is_unanswerable(after) and not is_unanswerable(before) else "reworded")
-        kinds[kind].append(deltas[q])
+        kinds[revision_kind(before, after)].append(deltas[q])
     return {"delta": statistics.mean(values), "ci": (means[int(0.025 * resamples)], means[int(0.975 * resamples) - 1]),
             "kinds": {k: {"n": len(v), "mean_delta": statistics.mean(v) if v else 0.0} for k, v in kinds.items()}}
 
@@ -235,7 +251,7 @@ def run_setup(client: Any, setup: Setup, writer: RunConfig, contexts: dict[str, 
               paths: dict[str, tuple[Path, Path]], max_dollars: float, poll_seconds: float = 30) -> None:
     """Critic stage, then revise stage. Each is refused when its estimate is over max_dollars, unless a batch for it
     is already paid for and waiting to be collected."""
-    read = lambda stage: {r["question_id"]: r for r in read_answers(paths[stage][0])}
+    read = lambda stage: read_stage(paths, stage)
     if setup.critic:
         e = estimate_setup(client, setup, writer, contexts, costs, read("critic"), read("revise"))
         if e["critic_dollars"] > max_dollars and not paths["critic"][1].exists():
@@ -273,8 +289,7 @@ def main() -> None:
         writer = runs[setup.writer]
         contexts = build_contexts(setup, papers, args.questions or sample["questions"], sample["seed"], max_words)
         paths = stage_paths(setup, writer, max_words)
-        critiques = {r["question_id"]: r for r in read_answers(paths["critic"][0])}
-        revisions = {r["question_id"]: r for r in read_answers(paths["revise"][0])}
+        critiques, revisions = read_stage(paths, "critic"), read_stage(paths, "revise")
         if args.command == "estimate":
             e = estimate_setup(client, setup, writer, contexts, costs, critiques, revisions)
             print(f"{name:28} critic {e['critic_requests']} requests ≈ ${e['critic_dollars']:.2f}   "
@@ -285,7 +300,7 @@ def main() -> None:
         else:
             r = report(papers, contexts, critiques, revisions)
             a = analyze(contexts, final_answers(contexts, critiques, revisions), analysis["bootstrap_resamples"], analysis["seed"])
-            ran = r["critiques"] or r["revisions"] or (setup.critic is None and not revise_requests(setup, writer, contexts, {}))
+            ran = has_run(setup, writer, contexts, critiques, revisions)
             status = (f"critic: {r['critiques']} reviews ({r['critic_revise']} revise, {r['critic_errors']} errors)  "
                       f"revisions: {r['revisions']} ({r['revision_failures']} failed), {r['changed']} changed: answer-F1 "
                       f"better {r['better']}, worse {r['worse']}") if ran else "not run yet"
