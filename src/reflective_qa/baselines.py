@@ -111,10 +111,10 @@ def run_batch(client: Any, run: RunConfig, requests: dict[str, dict], costs: Cos
     """Answers go to the run's JSON lines file, in the shape `scoring.load_predictions` reads."""
     answers_path, batch_path = run_paths(run, out_dir)
     return submit_and_collect(client, requests, answers_path, batch_path,
-                              lambda qid, message: _record(parse_message(qid, message), run, costs), poll_seconds)
+                              lambda qid, message: answer_record(parse_message(qid, message), run, costs), poll_seconds)
 
 
-def _record(answer: Answer, run: RunConfig, costs: Costs) -> dict:
+def answer_record(answer: Answer, run: RunConfig, costs: Costs) -> dict:
     return {"question_id": answer.question_id, "predicted_answer": answer.answer,
             "predicted_evidence": list(answer.evidence_ids), "status": answer.status, "model": answer.model,
             "input_tokens": answer.input_tokens, "output_tokens": answer.output_tokens,
