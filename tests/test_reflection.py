@@ -2,6 +2,8 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from reflective_qa.answering import RunConfig, load_runs
 from reflective_qa.baselines import run_paths
 from reflective_qa.checks import Finding
@@ -31,12 +33,34 @@ def test_the_five_planned_setups_cover_both_writers():
     assert setups["haiku-sonnet-critic-checks"].critic.code_feedback and not setups["haiku-sonnet-critic"].critic.code_feedback
 
 
-def test_fingerprint_changes_with_the_critic_the_writer_and_the_word_limit():
+def test_fingerprint_changes_with_the_writer_the_critic_and_any_prompt(monkeypatch):
     setup = Setup("s", "haiku-k5", SONNET)
     base = fingerprint(setup, WRITER, 30)
     assert base == fingerprint(replace(setup, name="renamed"), WRITER, 30)
-    assert base != fingerprint(replace(setup, critic=replace(SONNET, code_feedback=True)), WRITER, 30)
-    assert base != fingerprint(setup, replace(WRITER, k=5), 30) != fingerprint(setup, WRITER, 25)
+    assert base != fingerprint(setup, replace(WRITER, k=5), 30)
+    assert base != fingerprint(replace(setup, critic=replace(SONNET, effort="high")), WRITER, 30)
+    monkeypatch.setattr("reflective_qa.critic.SYSTEM", "a different critic prompt")
+    assert base != fingerprint(setup, WRITER, 30)
+    monkeypatch.undo()
+    monkeypatch.setattr("reflective_qa.reflection.REVISE_INSTRUCTION", "a different revise prompt")
+    assert base != fingerprint(setup, WRITER, 30)
+
+
+def test_the_word_limit_counts_only_where_findings_are_shown():
+    plain = Setup("s", "haiku-k5", SONNET)
+    with_checks = Setup("s", "haiku-k5", replace(SONNET, code_feedback=True))
+    code_only = Setup("s", "haiku-k5", None)
+    assert fingerprint(plain, WRITER, 30) == fingerprint(plain, WRITER, 25)
+    assert fingerprint(with_checks, WRITER, 30) != fingerprint(with_checks, WRITER, 25)
+    assert fingerprint(code_only, WRITER, 30) != fingerprint(code_only, WRITER, 25)
+
+
+def test_a_sampled_question_without_a_draft_is_an_error(tmp_path):
+    papers = load_split(FIXTURE)
+    run_paths(load_runs()["haiku-k5"], tmp_path)[0].write_text(
+        json.dumps({"question_id": "q-extractive", "predicted_answer": "Foo", "predicted_evidence": []}) + "\n")
+    with pytest.raises(ValueError, match="no draft for 2 of 3"):
+        build_contexts(Setup("s", "haiku-k5", None), papers, n=None, seed=0, max_words=3, runs_dir=tmp_path)
 
 
 def test_contexts_carry_the_draft_and_the_check_findings(tmp_path):

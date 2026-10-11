@@ -8,7 +8,8 @@ max_answer_words = 35
 # findings go straight to the writer.
 [critic]
 effort = "medium"
-max_tokens = 16000
+# Thinking counts toward it. Caps a runaway review at about $0.02 (Sonnet, batch); a cut-off review keeps the draft.
+max_tokens = 4000
 
 [setups.sonnet-code-feedback]
 writer = "sonnet-k20"

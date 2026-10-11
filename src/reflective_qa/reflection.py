@@ -11,7 +11,7 @@ from typing import Any
 from reflective_qa.answering import RunConfig, build_request, load_runs
 from reflective_qa.baselines import RUNS_DIR, fingerprint as run_fingerprint, read_answers, run_paths, sample_questions
 from reflective_qa.checks import CONFIG, Finding, load_max_words, run_checks
-from reflective_qa.critic import SCHEMA as CRITIC_SCHEMA, SYSTEM as CRITIC_SYSTEM, CriticConfig, build_critic_request
+from reflective_qa.critic import CriticConfig, build_critic_request
 from reflective_qa.data import Paper, Paragraph, Question, text_only_questions
 from reflective_qa.retrieval import PaperRetriever
 
@@ -48,11 +48,26 @@ def load_setups(path: Path = CONFIG) -> dict[str, Setup]:
     return setups
 
 
+def _probe(max_words: int) -> Context:
+    """A fixed question whose draft trips several checks, so the fingerprint sees real finding texts."""
+    paragraphs = [Paragraph("s0p0", "Probe", "A probe paragraph."), Paragraph("s1p0", "Probe", "Another probe paragraph.")]
+    question = Question("probe", "probe", "Do they use a probe?", ())
+    answer = " ".join(["word"] * 60)  # fixed, so the draft text never depends on the word limit
+    findings = run_checks(question.text, answer, ("s9p9",), {p.id for p in paragraphs}, max_words)
+    draft = {"question_id": "probe", "predicted_answer": answer, "predicted_evidence": ["s9p9"], "status": "ok"}
+    return Context(Paper("probe", "Probe paper", "", tuple(paragraphs), (question,)), question, paragraphs, draft, findings)
+
+
 def fingerprint(setup: Setup, writer: RunConfig, max_words: int) -> str:
-    """Changes when the writer's run, the critic, any prompt or schema, or the checks' word limit changes."""
-    parts = {"writer": run_fingerprint(writer), "critic": asdict(setup.critic) if setup.critic else None,
-             "critic_system": CRITIC_SYSTEM, "critic_schema": CRITIC_SCHEMA, "revise": REVISE_INSTRUCTION,
-             "max_words": max_words}
+    """A hash of the actual critic and revise requests for a fixed probe question, so any change to a prompt, schema,
+    model setting, finding text or check behavior starts new files. The word limit counts only where findings are
+    shown: a critic that never sees them keeps its paid reviews when the limit changes."""
+    probe = _probe(max_words)
+    critique = {"verdict": "revise", "problems": [{"check": "unsupported", "detail": "probe"}]}
+    parts = {"writer": run_fingerprint(writer), "critic_requests": critic_requests(setup, {"probe": probe}),
+             "revise_request": revise_request(writer, probe, problems(setup, probe, critique))}
+    if setup.critic is None or setup.critic.code_feedback:
+        parts["max_words"] = max_words  # it decides which drafts get findings
     return hashlib.sha256(json.dumps(parts, sort_keys=True).encode()).hexdigest()[:10]
 
 
@@ -66,13 +81,19 @@ def build_contexts(setup: Setup, papers: list[Paper], n: int, seed: int, max_wor
                    runs_dir: Path = RUNS_DIR) -> dict[str, Context]:
     writer = load_runs()[setup.writer]
     drafts = {row["question_id"]: row for row in read_answers(run_paths(writer, runs_dir)[0])}
+    questions = sample_questions(text_only_questions(papers), n, seed)
+    if missing := [q.id for q in questions if q.id not in drafts]:
+        raise ValueError(f"{setup.writer} has no draft for {len(missing)} of {len(questions)} sampled questions; "
+                         "run its M1 baseline first")
     by_id = {paper.id: paper for paper in papers}
+    retrievers: dict[str, PaperRetriever] = {}
     contexts = {}
-    for question in sample_questions(text_only_questions(papers), n, seed):
-        if (draft := drafts.get(question.id)) is None:
-            continue
+    for question in questions:
+        draft = drafts[question.id]
         paper = by_id[question.paper_id]
-        passages = PaperRetriever(paper).retrieve(question.text, writer.k)
+        if paper.id not in retrievers:
+            retrievers[paper.id] = PaperRetriever(paper)
+        passages = retrievers[paper.id].retrieve(question.text, writer.k)
         findings = run_checks(question.text, draft["predicted_answer"], tuple(draft["predicted_evidence"]),
                               {p.id for p in passages}, max_words)
         contexts[question.id] = Context(paper, question, passages, draft, findings)
