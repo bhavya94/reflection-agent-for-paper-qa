@@ -1,34 +1,24 @@
 """One-shot answers from a writer run on the shared question sample: build the requests, estimate them, run them with
 the Batch API, and score them on their own sample."""
 
-import math
 from pathlib import Path
+from typing import Any
 
 from reflective_qa.agent.checks import CodeChecks
 from reflective_qa.agent.writer import Writer
 from reflective_qa.data.qasper import QasperSplit
 from reflective_qa.eval.metrics import answer_f1, is_unanswerable, normalize
 from reflective_qa.eval.scorer import Scorer, load_predictions
-from reflective_qa.paths import load_config
-from reflective_qa.retrieval.bm25 import Retriever
-from reflective_qa.runs.batch import BatchRunner
+from reflective_qa.experiments.base import Experiment
 from reflective_qa.runs.costs import CostEstimator, Costs
 from reflective_qa.runs.store import RunStore
 
 
-class BaselineExperiment:
-    def __init__(self, split: QasperSplit, store: RunStore, costs: Costs, n: int | None, seed: int,
-                 runner: BatchRunner | None = None):
-        """`runner` is needed only to estimate and run; scoring reads the run files."""
-        self.split, self.store, self.costs, self.n, self.seed, self.runner = split, store, costs, n, seed, runner
-        self.retriever = Retriever(split)
-
+class BaselineExperiment(Experiment):
     @classmethod
     def from_config(cls, split: QasperSplit, store: RunStore, n: int | None = None,
-                    runner: BatchRunner | None = None) -> "BaselineExperiment":
-        """The seeded sample of configs/answering.toml, or its first n questions."""
-        sample = load_config("answering")["sample"]
-        return cls(split, store, Costs.from_config(), n or sample["questions"], sample["seed"], runner)
+                    client: Any | None = None) -> "BaselineExperiment":
+        return cls(split, store, Costs.from_config(), *cls.sample_config(n), client)
 
     def requests(self, writer: Writer) -> dict[str, dict]:
         """Request parameters keyed by question ID, for the sample."""
@@ -42,20 +32,22 @@ class BaselineExperiment:
     def estimate(self, writer: Writer, requests: dict[str, dict]) -> dict:
         """Batch cost of answering `requests`. Output tokens are this run's measured mean if it has answers, else the
         configured assumption."""
+        _, estimator = self._api()
         if not requests:
             return {"run": writer.name, "questions": 0, "input_tokens": 0, "output_tokens": 0, "output_measured": False,
                     "dollars": 0.0}
-        estimator = CostEstimator(self.runner.client, self.costs)
         answered = self.store.answers(writer)
-        output, input_mean = estimator.output_tokens(answered), estimator.input_tokens(requests)
-        return {"run": writer.name, "questions": len(requests), "input_tokens": input_mean, "output_tokens": output,
-                "output_measured": bool(answered),
-                "dollars": self.costs.dollars(writer.model, input_mean * len(requests), output * len(requests))}
+        output = estimator.output_tokens(answered)
+        cost = estimator.estimate(writer.model, requests, output)
+        return {"run": writer.name, "questions": len(requests), "input_tokens": cost["input_tokens"], "output_tokens": output,
+                "output_measured": bool(answered), "dollars": cost["dollars"]}
 
-    def run(self, writer: Writer, requests: dict[str, dict], *, estimate: float = 0.0,
-            max_dollars: float = math.inf) -> Path:
-        """Answers go to the run's file. Refused when `estimate` (from `estimate()`) is over max_dollars."""
-        return self.runner.run(requests, self.store.writer_files(writer), self.costs.recorder(Writer.parse, writer.model),
+    def run(self, writer: Writer, requests: dict[str, dict], max_dollars: float) -> Path:
+        """Answers go to the run's file. Refused when the estimate for the unanswered requests is over max_dollars,
+        unless a batch for them is already paid for and waiting."""
+        runner, _ = self._api()
+        estimate = self.estimate(writer, self.pending(writer, requests))["dollars"]
+        return runner.run(requests, self.store.writer_files(writer), self.costs.recorder(Writer.parse, writer.model),
                                estimate=estimate, max_dollars=max_dollars, label=f"{writer.name}:")
 
     def report(self, writer: Writer, requests: dict[str, dict]) -> dict:

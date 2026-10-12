@@ -51,7 +51,13 @@ class CostEstimator:
     def mean_output(rows: list[dict], default: float) -> float:
         return statistics.mean(r["output_tokens"] for r in rows) if rows else default
 
-    def dollars(self, model: str, requests: dict[str, dict], output_tokens: float) -> float:
+    def estimate(self, model: str, requests: dict[str, dict], output_tokens: float) -> dict:
+        """Mean input tokens per request (counted), and the dollars for all the requests."""
         if not requests:
-            return 0.0
-        return self.costs.dollars(model, self.input_tokens(requests) * len(requests), output_tokens * len(requests))
+            return {"input_tokens": 0, "dollars": 0.0}
+        input_tokens = self.input_tokens(requests)
+        return {"input_tokens": input_tokens,
+                "dollars": self.costs.dollars(model, input_tokens * len(requests), output_tokens * len(requests))}
+
+    def dollars(self, model: str, requests: dict[str, dict], output_tokens: float) -> float:
+        return self.estimate(model, requests, output_tokens)["dollars"]

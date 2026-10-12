@@ -6,7 +6,6 @@
 """
 
 import json
-import math
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -23,13 +22,15 @@ class BatchRunner:
         self.client, self.poll_seconds = client, poll_seconds
 
     def run(self, requests: dict[str, dict], files: tuple[Path, Path], record: Callable[[str, Any], dict], *,
-            estimate: float = 0.0, max_dollars: float = math.inf, label: str = "") -> Path:
+            estimate: float, max_dollars: float, label: str) -> Path:
+        """`estimate` is what the pending requests would cost. Pass max_dollars=math.inf only where no money is at
+        stake, such as tests with a fake client."""
         if estimate > max_dollars and not files[1].exists():
             raise OverBudget(f"{label} estimate ${estimate:.2f} is over --max-dollars {max_dollars}")
-        return self.submit_and_collect(requests, files, record)
+        return self._submit_and_collect(requests, files, record)
 
-    def submit_and_collect(self, requests: dict[str, dict], files: tuple[Path, Path],
-                           record: Callable[[str, Any], dict]) -> Path:
+    def _submit_and_collect(self, requests: dict[str, dict], files: tuple[Path, Path],
+                            record: Callable[[str, Any], dict]) -> Path:
         """Batch the requests not yet in the results file, wait, and append `record(custom_id, message)` for each
         succeeded result. Only succeeded results are written, so errored or expired requests are retried next time."""
         answers_path, batch_path = files

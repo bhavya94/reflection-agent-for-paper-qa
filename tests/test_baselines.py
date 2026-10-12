@@ -1,4 +1,5 @@
 import json
+import math
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,7 +9,7 @@ import pytest
 from reflective_qa.agent.writer import RunConfig, Writer
 from reflective_qa.data.qasper import QasperSplit
 from reflective_qa.experiments.baseline import BaselineExperiment
-from reflective_qa.runs.batch import BatchRunner, OverBudget
+from reflective_qa.runs.batch import OverBudget
 from reflective_qa.runs.costs import Costs
 from reflective_qa.runs.store import RunStore
 
@@ -59,8 +60,7 @@ class FakeClient:
 
 
 def _experiment(tmp_path, client=None, n=None):
-    return BaselineExperiment(QasperSplit.load(FIXTURE), RunStore(tmp_path), COSTS, n, seed=0,
-                              runner=BatchRunner(client or FakeClient(), poll_seconds=0))
+    return BaselineExperiment(QasperSplit.load(FIXTURE), RunStore(tmp_path), COSTS, n, seed=0, client=client or FakeClient())
 
 
 def _requests(run=RUN, n=None):
@@ -78,18 +78,18 @@ def test_samples_are_seeded_and_smaller_samples_are_prefixes_of_larger_ones():
 
 def test_only_unanswered_questions_are_submitted_and_failures_stay_pending(tmp_path):
     client = FakeClient(fail={"q-boolean"})
-    path = _experiment(tmp_path, client).run(RUN, _requests())
+    path = _experiment(tmp_path, client).run(RUN, _requests(), math.inf)
     assert sorted(_ids(path)) == ["q-abstractive", "q-extractive"]
-    _experiment(tmp_path, client).run(RUN, _requests())
+    _experiment(tmp_path, client).run(RUN, _requests(), math.inf)
     assert client.created[1] == ["q-boolean"]
 
 
 def test_an_interrupted_run_resumes_its_saved_batch_without_paying_again(tmp_path):
     client = FakeClient(interrupt=True)
     with pytest.raises(KeyboardInterrupt):
-        _experiment(tmp_path, client).run(RUN, _requests())
+        _experiment(tmp_path, client).run(RUN, _requests(), math.inf)
     assert RunStore(tmp_path).writer_files(RUN)[1].exists()  # batch ID saved before waiting
-    path = _experiment(tmp_path, client).run(RUN, _requests())
+    path = _experiment(tmp_path, client).run(RUN, _requests(), math.inf)
     assert len(client.created) == 1 and sorted(_ids(path)) == sorted(_requests())
 
 
@@ -97,31 +97,31 @@ def test_resuming_never_writes_a_question_twice(tmp_path):
     client = FakeClient()
     client.batches["batch_saved"] = list(_requests())  # the saved batch also holds an answered question
     answers, batch = RunStore(tmp_path).writer_files(RUN)
-    answers.write_text(json.dumps({"question_id": "q-extractive", "cost": 0}) + "\n")
+    answers.write_text(json.dumps({"question_id": "q-extractive", "cost": 0, "output_tokens": 100}) + "\n")
     batch.write_text("batch_saved")
-    _experiment(tmp_path, client).run(RUN, _requests())
+    _experiment(tmp_path, client).run(RUN, _requests(), math.inf)
     assert sorted(_ids(answers)) == sorted(_requests())
 
 
 def test_a_changed_config_starts_a_new_file_instead_of_mixing_answers(tmp_path):
     client = FakeClient()
-    first = _experiment(tmp_path, client).run(RUN, _requests())
+    first = _experiment(tmp_path, client).run(RUN, _requests(), math.inf)
     changed = Writer(replace(RUN.config, effort="high"))
-    second = _experiment(tmp_path, client).run(changed, _requests(changed))
+    second = _experiment(tmp_path, client).run(changed, _requests(changed), math.inf)
     assert first != second and len(client.created) == 2 and len(_ids(first)) == len(_ids(second)) == 3
 
 
 def test_each_answer_records_its_cost_and_estimates_switch_to_measured_output(tmp_path):
     before = _experiment(tmp_path).estimate(RUN, _requests())
     assert before["output_tokens"] == 500 and before["dollars"] == (3 * 1000 * 2.0 + 3 * 500 * 10.0) / 1e6 * 0.5
-    path = _experiment(tmp_path).run(RUN, _requests())
+    path = _experiment(tmp_path).run(RUN, _requests(), math.inf)
     assert RunStore.read(path)[0]["cost"] == (1000 * 2.0 + 100 * 10.0) / 1e6 * 0.5
     after = _experiment(tmp_path).estimate(RUN, _requests())
     assert after["output_tokens"] == 100 and after["output_measured"]
 
 
 def test_report_scores_a_run_on_its_own_sample_with_its_cost(tmp_path):
-    _experiment(tmp_path).run(RUN, _requests(n=2))
+    _experiment(tmp_path).run(RUN, _requests(n=2), math.inf)
     result = _experiment(tmp_path).report(RUN, _requests(n=2))
     assert (result["questions"], result["missing"]) == (2, 0)  # the third fixture question is outside the sample
     assert result["cost"] == 2 * (1000 * 2.0 + 100 * 10.0) / 1e6 * 0.5 and result["output_tokens"] == 100
@@ -129,11 +129,17 @@ def test_report_scores_a_run_on_its_own_sample_with_its_cost(tmp_path):
 
 def test_a_run_over_budget_is_refused_unless_its_batch_is_already_paid_for(tmp_path):
     client = FakeClient()
-    with pytest.raises(OverBudget, match=r"test: estimate \$2.00 is over --max-dollars 1.0"):
-        _experiment(tmp_path, client).run(RUN, _requests(), estimate=2.0, max_dollars=1.0)
+    with pytest.raises(OverBudget, match=r"test: estimate \$0.01 is over --max-dollars 0.001"):  # 3 questions, about $0.0105
+        _experiment(tmp_path, client).run(RUN, _requests(), max_dollars=0.001)
     assert client.created == []
     client.batches["batch_paid"] = list(_requests())
     answers, batch = RunStore(tmp_path).writer_files(RUN)
     batch.write_text("batch_paid")
-    _experiment(tmp_path, client).run(RUN, _requests(), estimate=2.0, max_dollars=1.0)
+    _experiment(tmp_path, client).run(RUN, _requests(), max_dollars=0.001)
     assert client.created == [] and sorted(_ids(answers)) == sorted(_requests())
+
+
+def test_estimating_or_running_without_an_api_client_fails_clearly(tmp_path):
+    experiment = BaselineExperiment(QasperSplit.load(FIXTURE), RunStore(tmp_path), COSTS, None, seed=0)
+    with pytest.raises(ValueError, match="need an API client"):
+        experiment.run(RUN, _requests(), max_dollars=1.0)

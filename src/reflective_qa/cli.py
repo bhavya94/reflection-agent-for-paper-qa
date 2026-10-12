@@ -14,9 +14,10 @@ Paid commands need ANTHROPIC_API_KEY (`uv run --env-file .env rqa ...`) and refu
 import argparse
 import statistics
 from pathlib import Path
+from typing import Any
 
 from reflective_qa.agent.checks import CodeChecks
-from reflective_qa.agent.reflection import ReflectionAgent, Setup
+from reflective_qa.agent.reflection import ReflectionAgent
 from reflective_qa.agent.writer import Writer
 from reflective_qa.data.download import download
 from reflective_qa.data.qasper import QasperSplit
@@ -26,7 +27,7 @@ from reflective_qa.experiments.baseline import BaselineExperiment
 from reflective_qa.experiments.reflection import ReflectionExperiment
 from reflective_qa.paths import DEV_SPLIT, load_config
 from reflective_qa.retrieval.recall import RecallEvaluator
-from reflective_qa.runs.batch import BatchRunner, OverBudget
+from reflective_qa.runs.batch import OverBudget
 from reflective_qa.runs.store import RunStore
 
 
@@ -60,19 +61,19 @@ def _score(args: argparse.Namespace) -> None:
         print(f"  {answer_type:12} {f1:.3f}")
 
 
-def _runner(args: argparse.Namespace) -> BatchRunner | None:
+def _client(args: argparse.Namespace) -> Any | None:
     """An API client only for the commands that call the API; `report` reads files only."""
     if args.action == "report":
         return None
     if args.action == "run" and args.max_dollars is None:
         raise SystemExit("run needs --max-dollars")
     import anthropic
-    return BatchRunner(anthropic.Anthropic())
+    return anthropic.Anthropic()
 
 
 def _baselines(args: argparse.Namespace) -> None:
     store, writers = RunStore(), Writer.load_all()
-    experiment = BaselineExperiment.from_config(QasperSplit.load(args.dev), store, args.questions, _runner(args))
+    experiment = BaselineExperiment.from_config(QasperSplit.load(args.dev), store, args.questions, _client(args))
     for name in args.names or writers:
         writer = writers[name]
         requests = experiment.requests(writer)
@@ -88,7 +89,7 @@ def _baselines(args: argparse.Namespace) -> None:
               f"tokens  {e['output_tokens']:,.0f} output ({'measured' if e['output_measured'] else 'assumed'})  "
               f"≈ ${e['dollars']:.2f}")
         if args.action == "run":
-            path = experiment.run(writer, requests, estimate=e["dollars"], max_dollars=args.max_dollars)
+            path = experiment.run(writer, requests, args.max_dollars)
             rows = store.read(path)
             statuses = {s: sum(r["status"] == s for r in rows) for s in sorted({r["status"] for r in rows})}
             print(f"  -> {path.name}: {len(rows)} answers {statuses}, "
@@ -107,12 +108,10 @@ def _checks(args: argparse.Namespace) -> None:
 
 
 def _reflect(args: argparse.Namespace) -> None:
-    writers, checks = Writer.load_all(), CodeChecks.from_config()
-    experiment = ReflectionExperiment.from_config(QasperSplit.load(args.dev), RunStore(), args.questions, _runner(args))
-    for name, setup in Setup.load_all().items():
+    experiment = ReflectionExperiment.from_config(QasperSplit.load(args.dev), RunStore(), args.questions, _client(args))
+    for name, agent in ReflectionAgent.load_all().items():
         if args.names and name not in args.names:
             continue
-        agent = ReflectionAgent(setup, writers[setup.writer], checks)
         contexts = experiment.contexts(agent)
         critiques, revisions = experiment.results(agent)
         if args.action == "estimate":
@@ -150,13 +149,14 @@ def main(argv: list[str] | None = None) -> None:
         command.set_defaults(func=func)
     commands.choices["score"].add_argument("predictions", type=Path,
                                            help="JSON lines of question_id, predicted_answer, predicted_evidence")
-    for name, configured in [("baselines", "writer runs in configs/answering.toml"),
-                             ("reflect", "setups in configs/reflection.toml")]:
+    for name, configured, budget in [
+            ("baselines", "writer runs in configs/answering.toml", "per writer run"),
+            ("reflect", "setups in configs/reflection.toml", "per setup and per stage, so 6 setups x 2 stages can spend 12x")]:
         command = commands.choices[name]
         command.add_argument("action", choices=["estimate", "run", "report"])
         command.add_argument("names", nargs="*", help=f"{configured}; default: all")
         command.add_argument("--questions", type=int, help="size of the seeded question sample; default: the config's")
-        command.add_argument("--max-dollars", type=float, help="required for run: refuse if an estimate is higher")
+        command.add_argument("--max-dollars", type=float, help=f"required for run: refuse if an estimate is higher; {budget}")
     args = parser.parse_args(argv)
     try:
         args.func(args)

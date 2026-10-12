@@ -1,4 +1,5 @@
 import json
+import math
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,7 +12,7 @@ from reflective_qa.agent.writer import Writer
 from reflective_qa.data.qasper import QasperSplit
 from reflective_qa.eval.analysis import RevisionAnalysis
 from reflective_qa.experiments.reflection import ReflectionExperiment
-from reflective_qa.runs.batch import BatchRunner, OverBudget
+from reflective_qa.runs.batch import OverBudget
 from reflective_qa.runs.costs import Costs
 from reflective_qa.runs.store import RunStore
 
@@ -58,13 +59,13 @@ def _setup_drafts(tmp_path, client=None):
         json.dumps({"question_id": q.id, "predicted_answer": "a tiny model with many words", "predicted_evidence": ["s0p0"],
                     "output_tokens": 50}) + "\n" for q in split.questions()))
     experiment = ReflectionExperiment(split, store, COSTS, None, 0, RevisionAnalysis(100, 0),
-                                      runner=BatchRunner(client or FakeBatches({}), poll_seconds=0))
+                                      client=client or FakeBatches({}))
     return experiment, agent, experiment.contexts(agent)
 
 
 def _run(tmp_path, verdicts):
     experiment, agent, contexts = _setup_drafts(tmp_path, FakeBatches(verdicts))
-    experiment.run(agent, contexts)
+    experiment.run(agent, contexts, math.inf)
     critiques, revisions = experiment.results(agent)
     return experiment, contexts, critiques, revisions, agent.revise_requests(contexts, critiques)
 
@@ -77,7 +78,7 @@ def test_only_drafts_the_critic_flags_are_revised(tmp_path):
 
 def test_final_answers_use_the_revision_and_count_both_stages_cost(tmp_path):
     _, contexts, critiques, revisions, _ = _run(tmp_path, {"q-extractive": "revise", "q-abstractive": "pass", "q-boolean": "pass"})
-    final = ReflectionAgent.final_answers(contexts, critiques, revisions)
+    final = ReflectionExperiment.final_answers(contexts, critiques, revisions)
     assert (final["q-extractive"]["predicted_answer"], final["q-extractive"]["revised"]) == ("Foo", True)
     assert final["q-abstractive"]["predicted_answer"] == "a tiny model with many words"
     critic_cost, revise_cost = (1000 * 2.0 + 100 * 10.0) / 1e6 * 0.5, (1000 * 0.1 + 100 * 0.5) / 1e6 * 0.5
@@ -87,7 +88,7 @@ def test_final_answers_use_the_revision_and_count_both_stages_cost(tmp_path):
 def test_a_failed_revision_keeps_the_draft(tmp_path):
     _, contexts, critiques, revisions, _ = _run(tmp_path, {"q-extractive": "revise", "q-abstractive": "pass", "q-boolean": "pass"})
     revisions["q-extractive"]["status"] = "refusal"
-    assert ReflectionAgent.final_answers(contexts, critiques, revisions)["q-extractive"]["revised"] is False
+    assert ReflectionExperiment.final_answers(contexts, critiques, revisions)["q-extractive"]["revised"] is False
 
 
 def test_report_counts_changed_answers_and_which_way_answer_f1_moved(tmp_path):

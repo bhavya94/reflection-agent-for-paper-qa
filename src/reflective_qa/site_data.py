@@ -2,8 +2,7 @@
 
 from pathlib import Path
 
-from reflective_qa.agent.checks import CodeChecks
-from reflective_qa.agent.reflection import Context, ReflectionAgent, Setup
+from reflective_qa.agent.reflection import Context, ReflectionAgent
 from reflective_qa.agent.writer import Writer
 from reflective_qa.data.qasper import QasperSplit
 from reflective_qa.experiments.baseline import BaselineExperiment
@@ -25,7 +24,7 @@ def pick_examples(cases: list[tuple[str, dict[str, Context], dict[str, dict]]]) 
     rewording, the largest loss."""
     best: dict[str, tuple[float, dict]] = {}
     for setup, contexts, final in cases:
-        for r in ReflectionAgent.revisions(contexts, final):
+        for r in ReflectionExperiment.before_after(contexts, final):
             if not r.changed:
                 continue
             kind = r.kind
@@ -41,21 +40,20 @@ def pick_examples(cases: list[tuple[str, dict[str, Context], dict[str, dict]]]) 
 def collect(split: QasperSplit, runs_dir: Path = RUNS_DIR) -> dict:
     store = RunStore(runs_dir)
     baseline, reflection = BaselineExperiment.from_config(split, store), ReflectionExperiment.from_config(split, store)
-    checks, writers = CodeChecks.from_config(), Writer.load_all()
     baselines = []
-    for name, writer in writers.items():
+    for name, writer in Writer.load_all().items():
         r = baseline.report(writer, baseline.requests(writer))
         baselines.append({"name": name, "model": writer.model, "k": writer.k, "answer_f1": r["answer_f1"],
                           "evidence_f1": r["evidence_f1"] if writer.k else None,
                           "unanswerable": r["predicted_unanswerable"], "cost": r["cost"]})
     setups, cases = [], []
-    for name, setup in Setup.load_all().items():
-        agent = ReflectionAgent(setup, writers[setup.writer], checks)
+    for name, agent in ReflectionAgent.load_all().items():
+        setup = agent.setup
         contexts = reflection.contexts(agent)
         critiques, revisions = reflection.results(agent)
         if not reflection.has_run(agent, contexts, critiques, revisions):
             raise ValueError(f"{name} has not run with the current code and config; run it before building the page")
-        final = ReflectionAgent.final_answers(contexts, critiques, revisions)
+        final = reflection.final_answers(contexts, critiques, revisions)
         r = reflection.report(contexts, critiques, revisions)
         a = reflection.analyze(contexts, critiques, revisions)
         setups.append({"name": name, "writer": setup.writer, "critic": setup.critic.model if setup.critic else None,
