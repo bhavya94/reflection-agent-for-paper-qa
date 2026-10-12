@@ -1,5 +1,5 @@
-"""Code checks on a draft answer: free, deterministic feedback (Module 2's "external feedback") for the critic and
-the writer. Each finding uses a name from the critic's checklist, so the critic can confirm or reject it."""
+"""Code checks on a draft answer: free, deterministic feedback from outside the model, for the critic and the
+writer. Each finding uses a name from the critic's checklist, so the critic can confirm or reject it."""
 
 import re
 from dataclasses import dataclass

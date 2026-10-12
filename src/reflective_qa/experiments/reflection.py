@@ -34,7 +34,7 @@ class ReflectionExperiment(Experiment):
         questions = self.split.sample(self.n, self.seed)
         if missing := [q.id for q in questions if q.id not in drafts]:
             raise ValueError(f"{agent.writer.name} has no draft for {len(missing)} of {len(questions)} sampled questions; "
-                             "run its M1 baseline first")
+                             "run `rqa baselines run` for it first")
         return {q.id: agent.context(self.split.paper(q.paper_id), q, self.retriever.retrieve(q, agent.writer.k), drafts[q.id])
                 for q in questions}
 
@@ -84,8 +84,8 @@ class ReflectionExperiment(Experiment):
                         max_dollars=max_dollars, label=f"{agent.name}: revise")
 
     def report(self, contexts: dict[str, Context], critiques: dict[str, dict], revisions: dict[str, dict]) -> dict:
-        """Final answers scored like M1, plus what reflection did. better and worse compare answer-F1 per question,
-        over the answers a revision actually changed."""
+        """Final answers scored like the first answers, plus what reflection did. better and worse compare
+        answer-F1 per question, over the answers a revision actually changed."""
         final = self.final_answers(contexts, critiques, revisions)
         scorer, ids = Scorer(self.split), set(contexts)
         result = scorer.score({qid: Prediction.from_row(row) for qid, row in final.items()}, ids)
