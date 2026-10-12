@@ -6,10 +6,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from reflective_qa.data import Paper, Paragraph, Question
-from reflective_qa.retrieval import passage_text
+from reflective_qa.data.records import Paper, Paragraph, Question
+from reflective_qa.paths import CONFIGS
+from reflective_qa.retrieval.bm25 import passage_text
 
-CONFIG = Path(__file__).resolve().parents[2] / "configs" / "answering.toml"
+CONFIG = CONFIGS / "answering.toml"
 
 SYSTEM = """You answer questions about one scientific paper.
 - Keep the answer as short as possible. When a phrase in the passages answers the question, copy it.

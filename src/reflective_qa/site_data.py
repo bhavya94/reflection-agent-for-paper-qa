@@ -6,7 +6,7 @@ from pathlib import Path
 from reflective_qa.answering import CONFIG as ANSWERING, load_runs
 from reflective_qa.baselines import RUNS_DIR, build_requests, report as baseline_report, total_spent
 from reflective_qa.checks import CONFIG as REFLECTION, load_max_words
-from reflective_qa.data import Paper
+from reflective_qa.data.qasper import QasperSplit
 from reflective_qa.reflection import (Context, analyze, build_contexts, final_answers, has_run, load_setups, read_stage,
                                       report, revision_kind, stage_paths)
 from reflective_qa.scoring import answer_f1
@@ -41,26 +41,26 @@ def pick_examples(cases: list[tuple[str, dict[str, Context], dict[str, dict]]]) 
     return {kind: example for kind, (_, example) in best.items()}
 
 
-def collect(papers: list[Paper], runs_dir: Path = RUNS_DIR) -> dict:
+def collect(split: QasperSplit, runs_dir: Path = RUNS_DIR) -> dict:
     sample = tomllib.loads(ANSWERING.read_text())["sample"]
     analysis_config = tomllib.loads(REFLECTION.read_text())["analysis"]
     max_words, runs = load_max_words(), load_runs()
     baselines = []
     for name, run in runs.items():
-        r = baseline_report(run, build_requests(run, papers, sample["questions"], sample["seed"]), papers, runs_dir)
+        r = baseline_report(run, build_requests(run, split, sample["questions"], sample["seed"]), split, runs_dir)
         baselines.append({"name": name, "model": run.model, "k": run.k, "answer_f1": r["answer_f1"],
                           "evidence_f1": r["evidence_f1"] if run.k else None,
                           "unanswerable": r["predicted_unanswerable"], "cost": r["cost"]})
     setups, cases = [], []
     for name, setup in load_setups().items():
         writer = runs[setup.writer]
-        contexts = build_contexts(setup, papers, sample["questions"], sample["seed"], max_words, runs_dir)
+        contexts = build_contexts(setup, split, sample["questions"], sample["seed"], max_words, runs_dir)
         paths = stage_paths(setup, writer, max_words, runs_dir)
         critiques, revisions = read_stage(paths, "critic"), read_stage(paths, "revise")
         if not has_run(setup, writer, contexts, critiques, revisions):
             raise ValueError(f"{name} has not run with the current code and config; run it before building the page")
         final = final_answers(contexts, critiques, revisions)
-        r = report(papers, contexts, critiques, revisions)
+        r = report(split, contexts, critiques, revisions)
         a = analyze(contexts, final, analysis_config["bootstrap_resamples"], analysis_config["seed"])
         setups.append({"name": name, "writer": setup.writer, "critic": setup.critic.model if setup.critic else None,
                        "code_feedback": setup.critic is None or setup.critic.code_feedback,

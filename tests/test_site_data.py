@@ -6,7 +6,7 @@ import pytest
 from reflective_qa.answering import load_runs
 from reflective_qa.baselines import run_paths
 from reflective_qa.checks import load_max_words
-from reflective_qa.data import load_split
+from reflective_qa.data.qasper import QasperSplit
 from reflective_qa.reflection import Setup, build_contexts, load_setups, stage_paths
 from reflective_qa.site_data import collect, contributions, pick_examples
 
@@ -34,7 +34,7 @@ def test_contributions_add_up_to_the_total_change():
 
 def test_examples_are_the_clearest_case_of_each_kind_across_setups(tmp_path):
     write_drafts(tmp_path)
-    contexts = build_contexts(Setup("s", "haiku-k5", None), load_split(FIXTURE), None, 0, 35, runs_dir=tmp_path)
+    contexts = build_contexts(Setup("s", "haiku-k5", None), QasperSplit.load(FIXTURE), None, 0, 35, runs_dir=tmp_path)
     final = lambda answers: {q: {"predicted_answer": a} for q, a in answers.items()}
     a = final({"q-extractive": "Foo, Bar",                 # shortened: the larger gain
                "q-abstractive": "a model",                 # abstention fixed: the smaller gain
@@ -60,7 +60,7 @@ def test_collect_scores_every_setup_and_measures_noise_from_the_replicate_pair(t
         write_rows(paths["revise"][0], [{"question_id": "q-abstractive", "status": "ok", "cost": 0.03,
                                          "predicted_answer": "a tiny model" if fixed else "Unanswerable",
                                          "predicted_evidence": []}])
-    data = collect(load_split(FIXTURE), tmp_path)
+    data = collect(QasperSplit.load(FIXTURE), tmp_path)
     setups = {row["name"]: row for row in data["setups"]}
     assert setups["haiku-sonnet-critic-checks"]["delta"] == pytest.approx(1 / 3)  # 0 -> 1 on one of three questions
     assert setups["haiku-sonnet-critic"]["delta"] == 0
@@ -73,4 +73,4 @@ def test_collect_scores_every_setup_and_measures_noise_from_the_replicate_pair(t
 def test_collect_refuses_a_setup_that_has_not_run(tmp_path):
     write_drafts(tmp_path)  # M1 drafts only: no critic or revise results, e.g. after a prompt change
     with pytest.raises(ValueError, match="has not run"):
-        collect(load_split(FIXTURE), tmp_path)
+        collect(QasperSplit.load(FIXTURE), tmp_path)

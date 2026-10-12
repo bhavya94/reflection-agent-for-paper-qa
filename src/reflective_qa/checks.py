@@ -8,9 +8,10 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from reflective_qa.paths import CONFIGS
 from reflective_qa.scoring import is_unanswerable, normalize
 
-CONFIG = Path(__file__).resolve().parents[2] / "configs" / "reflection.toml"
+CONFIG = CONFIGS / "reflection.toml"
 # Starts with an auxiliary verb and offers no alternatives ("X or Y?"). On train: 97% recall, 0.82 precision for
 # questions all annotators answered Yes or No; most other matches were marked unanswerable.
 _YES_NO_QUESTION = re.compile(r"^(is|are|was|were|do|does|did|can|could|has|have|had|will|would|should)\b", re.I)
@@ -58,15 +59,14 @@ if __name__ == "__main__":
     # How often each check fires on the M1 drafts. The F1 comparison covers content answers only (not Unanswerable,
     # Yes or No), since too_long can't flag those; it describes the drafts, it doesn't validate the checks.
     from reflective_qa.answering import CONFIG as ANSWERING, load_runs
-    from reflective_qa.baselines import RUNS_DIR, read_answers, run_paths, sample_questions
-    from reflective_qa.data import load_split, text_only_questions
-    from reflective_qa.retrieval import PaperRetriever
+    from reflective_qa.baselines import RUNS_DIR, read_answers, run_paths
+    from reflective_qa.data.qasper import QasperSplit
+    from reflective_qa.retrieval.bm25 import Retriever
     from reflective_qa.scoring import answer_f1
 
-    papers = load_split(Path(sys.argv[1]))
-    by_id, max_words = {p.id: p for p in papers}, load_max_words()
+    split, max_words = QasperSplit.load(Path(sys.argv[1])), load_max_words()
     sample = tomllib.loads(ANSWERING.read_text())["sample"]
-    questions = sample_questions(text_only_questions(papers), sample["questions"], sample["seed"])
+    questions, retriever = split.sample(sample["questions"], sample["seed"]), Retriever(split)
     mean = lambda xs: f"{statistics.mean(xs):.3f} (n={len(xs)})" if xs else "n/a"
     for name, run in load_runs().items():
         if not run.k:
@@ -75,7 +75,7 @@ if __name__ == "__main__":
         counts, flagged_f1, clean_f1 = {}, [], []
         for q in questions:
             row = rows[q.id]
-            ids = {p.id for p in PaperRetriever(by_id[q.paper_id]).retrieve(q.text, run.k)}
+            ids = {p.id for p in retriever.retrieve(q, run.k)}
             found = run_checks(q.text, row["predicted_answer"], tuple(row["predicted_evidence"]), ids, max_words)
             for check in {f.check for f in found}:
                 counts[check] = counts.get(check, 0) + 1

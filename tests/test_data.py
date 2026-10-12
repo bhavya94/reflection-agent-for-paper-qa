@@ -2,19 +2,19 @@ from pathlib import Path
 
 import pytest
 
-from reflective_qa.data import AnswerType, Question, load_split, text_only_questions
+from reflective_qa.data.qasper import QasperSplit
+from reflective_qa.data.records import AnswerType, Question
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mini_qasper.json"
 
 
 @pytest.fixture(scope="module")
 def questions() -> dict[str, Question]:
-    papers = load_split(FIXTURE)
-    return {q.id: q for paper in papers for q in paper.questions}
+    return {q.id: q for q in QasperSplit.load(FIXTURE).questions()}
 
 
 def test_empty_and_repeated_paragraphs_are_dropped_and_ids_stay_positional():
-    (paper,) = load_split(FIXTURE)
+    (paper,) = QasperSplit.load(FIXTURE).papers
     assert [p.id for p in paper.paragraphs] == ["s0p0", "s0p2", "s1p0", "s1p1"]
     assert paper.paragraphs[2].section == "Experiments ::: Datasets"
 
@@ -42,5 +42,12 @@ def test_heading_evidence_is_kept_separately_even_when_a_paragraph_contains_it(q
 
 
 def test_text_only_excludes_questions_that_need_a_figure_or_table():
-    ids = {q.id for q in text_only_questions(load_split(FIXTURE))}
+    ids = {q.id for q in QasperSplit.load(FIXTURE).text_only_questions()}
     assert ids == {"q-extractive", "q-abstractive", "q-boolean"}
+
+
+def test_samples_are_seeded_text_only_and_smaller_samples_are_prefixes_of_larger_ones():
+    split = QasperSplit.load(FIXTURE)
+    assert split.sample(2, seed=0) == split.sample(3, seed=0)[:2]
+    assert sorted(q.id for q in split.sample(None, seed=0)) == ["q-abstractive", "q-boolean", "q-extractive"]
+    assert split.paper("2101.00001").questions[0].paper_id == "2101.00001"

@@ -11,11 +11,11 @@ import json
 import subprocess
 from pathlib import Path
 
-from reflective_qa.data import load_split
+from reflective_qa.data.qasper import QasperSplit
+from reflective_qa.paths import DEV_SPLIT, ROOT as PROJECT_ROOT
 from reflective_qa.site_data import collect
 
 TEMPLATE = Path(__file__).with_name("site_template.html")
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def render(data: dict, template: str) -> str:
@@ -29,11 +29,11 @@ def render(data: dict, template: str) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, default=PROJECT_ROOT / "site" / "index.html")
-    parser.add_argument("--dev", type=Path, default=PROJECT_ROOT / "data" / "raw" / "qasper-dev-v0.3.json")
+    parser.add_argument("--dev", type=Path, default=DEV_SPLIT)
     args = parser.parse_args()
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
                             cwd=PROJECT_ROOT).stdout.strip() or "unknown"
-    data = collect(load_split(args.dev)) | {"generated": datetime.date.today().isoformat(), "commit": commit}
+    data = collect(QasperSplit.load(args.dev)) | {"generated": datetime.date.today().isoformat(), "commit": commit}
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(render(data, TEMPLATE.read_text()))
     print(f"wrote {args.out} ({args.out.stat().st_size // 1024} KB)")

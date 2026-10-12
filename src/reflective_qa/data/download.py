@@ -9,7 +9,9 @@ import tomllib
 import urllib.request
 from pathlib import Path
 
-DEFAULT_CONFIG = Path(__file__).resolve().parents[2] / "configs" / "data.toml"
+from reflective_qa.paths import CONFIGS
+
+DEFAULT_CONFIG = CONFIGS / "data.toml"
 
 
 def download(config_path: Path = DEFAULT_CONFIG) -> Path:
@@ -33,7 +35,3 @@ def download(config_path: Path = DEFAULT_CONFIG) -> Path:
             for name in archive["extract"]:
                 os.replace(Path(tmp) / name, raw_dir / name)
     return raw_dir
-
-
-if __name__ == "__main__":
-    print(f"QASPER files in {download()}")

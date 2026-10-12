@@ -7,7 +7,7 @@ import pytest
 
 from reflective_qa.answering import RunConfig
 from reflective_qa.baselines import Costs, build_requests, estimate, read_answers, report, run_batch, run_paths
-from reflective_qa.data import load_split
+from reflective_qa.data.qasper import QasperSplit
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mini_qasper.json"
 RUN = RunConfig(name="test", model="m", k=2, effort="low", max_tokens=100)
@@ -56,7 +56,7 @@ class FakeClient:
 
 
 def _requests(run=RUN, n=None):
-    return build_requests(run, load_split(FIXTURE), n)
+    return build_requests(run, QasperSplit.load(FIXTURE), n)
 
 
 def _ids(path):
@@ -114,6 +114,6 @@ def test_each_answer_records_its_cost_and_estimates_switch_to_measured_output(tm
 
 def test_report_scores_a_run_on_its_own_sample_with_its_cost(tmp_path):
     run_batch(FakeClient(), RUN, _requests(n=2), COSTS, tmp_path, poll_seconds=0)
-    result = report(RUN, _requests(n=2), load_split(FIXTURE), tmp_path)
+    result = report(RUN, _requests(n=2), QasperSplit.load(FIXTURE), tmp_path)
     assert (result["questions"], result["missing"]) == (2, 0)  # the third fixture question is outside the sample
     assert result["cost"] == 2 * (1000 * 2.0 + 100 * 10.0) / 1e6 * 0.5 and result["output_tokens"] == 100

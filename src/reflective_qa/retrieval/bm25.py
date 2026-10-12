@@ -3,7 +3,8 @@
 import bm25s
 import Stemmer
 
-from reflective_qa.data import Paper, Paragraph
+from reflective_qa.data.qasper import QasperSplit
+from reflective_qa.data.records import Paper, Paragraph, Question
 
 
 def _tokenize(texts: list[str]) -> list[list[str]]:
@@ -32,3 +33,20 @@ class PaperRetriever:
             return []
         ranked, _ = self._bm25.retrieve(_tokenize([question]), k=k, show_progress=False)
         return [self.paragraphs[i] for i in ranked[0]]
+
+
+class Retriever:
+    """BM25 over a whole split. Each paper is indexed the first time a question asks about it, then reused."""
+
+    def __init__(self, split: QasperSplit):
+        self._split = split
+        self._indexes: dict[str, PaperRetriever] = {}
+
+    def index(self, paper_id: str) -> PaperRetriever:
+        if paper_id not in self._indexes:
+            self._indexes[paper_id] = PaperRetriever(self._split.paper(paper_id))
+        return self._indexes[paper_id]
+
+    def retrieve(self, question: Question, k: int) -> list[Paragraph]:
+        """The top-k paragraphs of the question's paper; none for k = 0 (closed-book), without building an index."""
+        return self.index(question.paper_id).retrieve(question.text, k) if k else []

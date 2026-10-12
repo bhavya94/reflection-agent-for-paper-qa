@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from reflective_qa.download import download
+from reflective_qa.data.download import download
 
 
 def _archive(tmp_path: Path, files: dict[str, str]) -> Path:

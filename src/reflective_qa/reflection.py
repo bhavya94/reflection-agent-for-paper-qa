@@ -13,11 +13,13 @@ from typing import Any, Callable
 
 from reflective_qa.answering import CONFIG as ANSWERING, RunConfig, build_request, load_runs, parse_message
 from reflective_qa.baselines import (RUNS_DIR, Costs, answer_record, count_input_tokens, fingerprint as run_fingerprint,
-                                     load_costs, read_answers, run_paths, sample_questions, submit_and_collect)
+                                     load_costs, read_answers, run_paths, submit_and_collect)
 from reflective_qa.checks import CONFIG, Finding, load_max_words, run_checks
 from reflective_qa.critic import CriticConfig, build_critic_request, parse_critique
-from reflective_qa.data import Paper, Paragraph, Question, load_split, text_only_questions
-from reflective_qa.retrieval import PaperRetriever
+from reflective_qa.data.qasper import QasperSplit
+from reflective_qa.data.records import Paper, Paragraph, Question
+from reflective_qa.paths import DEV_SPLIT
+from reflective_qa.retrieval.bm25 import Retriever
 from reflective_qa.scoring import Prediction, answer_f1, is_unanswerable, score
 
 # The answer rules are repeated because the 20-question pilot showed revisions drifting long and hedged
@@ -91,23 +93,20 @@ def read_stage(paths: dict[str, tuple[Path, Path]], stage: str) -> dict[str, dic
     return {r["question_id"]: r for r in read_answers(paths[stage][0])}
 
 
-def build_contexts(setup: Setup, papers: list[Paper], n: int, seed: int, max_words: int,
+def build_contexts(setup: Setup, split: QasperSplit, n: int, seed: int, max_words: int,
                    runs_dir: Path = RUNS_DIR) -> dict[str, Context]:
     writer = load_runs()[setup.writer]
     drafts = {row["question_id"]: row for row in read_answers(run_paths(writer, runs_dir)[0])}
-    questions = sample_questions(text_only_questions(papers), n, seed)
+    questions = split.sample(n, seed)
     if missing := [q.id for q in questions if q.id not in drafts]:
         raise ValueError(f"{setup.writer} has no draft for {len(missing)} of {len(questions)} sampled questions; "
                          "run its M1 baseline first")
-    by_id = {paper.id: paper for paper in papers}
-    retrievers: dict[str, PaperRetriever] = {}
+    retriever = Retriever(split)
     contexts = {}
     for question in questions:
         draft = drafts[question.id]
-        paper = by_id[question.paper_id]
-        if paper.id not in retrievers:
-            retrievers[paper.id] = PaperRetriever(paper)
-        passages = retrievers[paper.id].retrieve(question.text, writer.k)
+        paper = split.paper(question.paper_id)
+        passages = retriever.retrieve(question, writer.k)
         findings = run_checks(question.text, draft["predicted_answer"], tuple(draft["predicted_evidence"]),
                               {p.id for p in passages}, max_words)
         contexts[question.id] = Context(paper, question, passages, draft, findings)
@@ -174,15 +173,15 @@ def final_answers(contexts: dict[str, Context], critiques: dict[str, dict], revi
     return final
 
 
-def report(papers: list[Paper], contexts: dict[str, Context], critiques: dict[str, dict],
+def report(split: QasperSplit, contexts: dict[str, Context], critiques: dict[str, dict],
            revisions: dict[str, dict]) -> dict:
     """Final answers scored like M1, plus what reflection did. better and worse compare answer-F1 per question,
     over the answers a revision actually changed."""
     final = final_answers(contexts, critiques, revisions)
     to_prediction = lambda row: Prediction(row["predicted_answer"], tuple(row["predicted_evidence"]))
     ids = set(contexts)
-    result = score(papers, {qid: to_prediction(row) for qid, row in final.items()}, ids)
-    drafts = score(papers, {qid: to_prediction(c.draft) for qid, c in contexts.items()}, ids)
+    result = score(split, {qid: to_prediction(row) for qid, row in final.items()}, ids)
+    drafts = score(split, {qid: to_prediction(c.draft) for qid, c in contexts.items()}, ids)
     changed = [qid for qid, c in contexts.items() if final[qid]["revised"]
                and final[qid]["predicted_answer"] != c.draft["predicted_answer"]]
     delta = {qid: answer_f1(contexts[qid].question, final[qid]["predicted_answer"])[0]
@@ -270,14 +269,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["estimate", "run", "report"])
     parser.add_argument("setups", nargs="*", help="setup names from configs/reflection.toml; default: all")
-    parser.add_argument("--dev", type=Path, default=RUNS_DIR.parent / "raw" / "qasper-dev-v0.3.json")
+    parser.add_argument("--dev", type=Path, default=DEV_SPLIT)
     parser.add_argument("--questions", type=int, help="size of the M1 question sample; default: the config's")
     parser.add_argument("--max-dollars", type=float, help="required for run: per stage, refuse if the estimate is higher")
     args = parser.parse_args()
     if args.command == "run" and args.max_dollars is None:
         raise SystemExit("run needs --max-dollars")
     sample = tomllib.loads(ANSWERING.read_text())["sample"]
-    papers, costs, runs, max_words = load_split(args.dev), load_costs(), load_runs(), load_max_words()
+    split, costs, runs, max_words = QasperSplit.load(args.dev), load_costs(), load_runs(), load_max_words()
     analysis = tomllib.loads(CONFIG.read_text())["analysis"]
     client = None
     if args.command != "report":
@@ -287,7 +286,7 @@ def main() -> None:
         if args.setups and name not in args.setups:
             continue
         writer = runs[setup.writer]
-        contexts = build_contexts(setup, papers, args.questions or sample["questions"], sample["seed"], max_words)
+        contexts = build_contexts(setup, split, args.questions or sample["questions"], sample["seed"], max_words)
         paths = stage_paths(setup, writer, max_words)
         critiques, revisions = read_stage(paths, "critic"), read_stage(paths, "revise")
         if args.command == "estimate":
@@ -298,7 +297,7 @@ def main() -> None:
             run_setup(client, setup, writer, contexts, costs, paths, args.max_dollars)
             print(f"{name}: done; run `report` to score it")
         else:
-            r = report(papers, contexts, critiques, revisions)
+            r = report(split, contexts, critiques, revisions)
             a = analyze(contexts, final_answers(contexts, critiques, revisions), analysis["bootstrap_resamples"], analysis["seed"])
             ran = has_run(setup, writer, contexts, critiques, revisions)
             status = (f"critic: {r['critiques']} reviews ({r['critic_revise']} revise, {r['critic_errors']} errors)  "

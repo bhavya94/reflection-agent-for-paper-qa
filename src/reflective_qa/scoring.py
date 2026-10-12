@@ -17,7 +17,8 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-from reflective_qa.data import UNANSWERABLE, Paper, Question, text_only_questions
+from reflective_qa.data.qasper import QasperSplit
+from reflective_qa.data.records import UNANSWERABLE, Question
 
 
 @dataclass(frozen=True)
@@ -64,10 +65,10 @@ def is_unanswerable(answer: str) -> bool:
     return normalize(answer) == normalize(UNANSWERABLE)
 
 
-def score(papers: list[Paper], predictions: dict[str, Prediction], question_ids: set[str] | None = None) -> dict:
+def score(split: QasperSplit, predictions: dict[str, Prediction], question_ids: set[str] | None = None) -> dict:
     """Scores every text-only question, or only those in `question_ids`; a missing prediction scores 0 on both
     metrics, like the official evaluator."""
-    questions = [q for q in text_only_questions(papers) if question_ids is None or q.id in question_ids]
+    questions = [q for q in split.text_only_questions() if question_ids is None or q.id in question_ids]
     answer_scores, evidence_scores, by_type = [], [], {}
     for question in questions:
         prediction = predictions.get(question.id)
@@ -96,9 +97,7 @@ def load_predictions(path: Path) -> dict[str, Prediction]:
 
 
 if __name__ == "__main__":
-    from reflective_qa.data import load_split
-
-    result = score(load_split(Path(sys.argv[1])), load_predictions(Path(sys.argv[2])))
+    result = score(QasperSplit.load(Path(sys.argv[1])), load_predictions(Path(sys.argv[2])))
     print(f"{result['questions']} text-only questions, {result['missing']} without a prediction")
     print(f"answer-F1 {result['answer_f1']:.3f}  predicted 'Unanswerable' {result['predicted_unanswerable']:.1%}")
     print(f"paragraph-ID evidence-F1 {result['evidence_f1']:.3f} on {result['evidence_questions']} questions with "
