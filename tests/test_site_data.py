@@ -3,11 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from reflective_qa.answering import load_runs
 from reflective_qa.baselines import run_paths
-from reflective_qa.checks import load_max_words
+from reflective_qa.agent.checks import CodeChecks
+from reflective_qa.agent.reflection import ReflectionAgent, Setup
+from reflective_qa.agent.writer import Writer
 from reflective_qa.data.qasper import QasperSplit
-from reflective_qa.reflection import Setup, build_contexts, load_setups, stage_paths
+from reflective_qa.reflection import build_contexts, stage_paths
 from reflective_qa.site_data import collect, contributions, pick_examples
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mini_qasper.json"
@@ -19,7 +20,7 @@ def write_rows(path: Path, rows: list[dict]) -> None:
 
 
 def write_drafts(runs_dir: Path) -> None:
-    for run in load_runs().values():
+    for run in Writer.load_all().values():
         write_rows(run_paths(run, runs_dir)[0], [{"question_id": q, "predicted_answer": a, "predicted_evidence": [],
                                                   "cost": 0.01, "output_tokens": 5} for q, a in DRAFTS.items()])
 
@@ -34,7 +35,8 @@ def test_contributions_add_up_to_the_total_change():
 
 def test_examples_are_the_clearest_case_of_each_kind_across_setups(tmp_path):
     write_drafts(tmp_path)
-    contexts = build_contexts(Setup("s", "haiku-k5", None), QasperSplit.load(FIXTURE), None, 0, 35, runs_dir=tmp_path)
+    agent = ReflectionAgent(Setup("s", "haiku-k5", None), Writer.load_all()["haiku-k5"], CodeChecks(35))
+    contexts = build_contexts(agent, QasperSplit.load(FIXTURE), None, 0, runs_dir=tmp_path)
     final = lambda answers: {q: {"predicted_answer": a} for q, a in answers.items()}
     a = final({"q-extractive": "Foo, Bar",                 # shortened: the larger gain
                "q-abstractive": "a model",                 # abstention fixed: the smaller gain
@@ -51,9 +53,9 @@ def test_examples_are_the_clearest_case_of_each_kind_across_setups(tmp_path):
 
 def test_collect_scores_every_setup_and_measures_noise_from_the_replicate_pair(tmp_path):
     write_drafts(tmp_path)
-    runs, max_words = load_runs(), load_max_words()
-    for name, setup in load_setups().items():
-        paths = stage_paths(setup, runs[setup.writer], max_words, tmp_path)
+    writers, checks = Writer.load_all(), CodeChecks.from_config()
+    for name, setup in Setup.load_all().items():
+        paths = stage_paths(ReflectionAgent(setup, writers[setup.writer], checks), tmp_path)
         if setup.critic:
             write_rows(paths["critic"][0], [{"question_id": q, "verdict": "pass", "cost": 0.02} for q in DRAFTS])
         fixed = name == "haiku-sonnet-critic-checks"  # only one of the replicate pair fixes the abstention
@@ -66,7 +68,7 @@ def test_collect_scores_every_setup_and_measures_noise_from_the_replicate_pair(t
     assert setups["haiku-sonnet-critic"]["delta"] == 0
     assert data["noise"]["gap"] == pytest.approx(1 / 3)
     assert data["examples"]["abstain_to_answer"]["setup"] == "haiku-sonnet-critic-checks"
-    critic_setups = sum(bool(s.critic) for s in load_setups().values())
+    critic_setups = sum(bool(s.critic) for s in Setup.load_all().values())
     assert data["spent"] == pytest.approx(3 * 3 * 0.01 + critic_setups * 3 * 0.02 + 6 * 0.03)
 
 

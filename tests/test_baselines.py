@@ -5,12 +5,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from reflective_qa.answering import RunConfig
+from reflective_qa.agent.writer import RunConfig, Writer
 from reflective_qa.baselines import Costs, build_requests, estimate, read_answers, report, run_batch, run_paths
 from reflective_qa.data.qasper import QasperSplit
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mini_qasper.json"
-RUN = RunConfig(name="test", model="m", k=2, effort="low", max_tokens=100)
+RUN = Writer(RunConfig(name="test", model="m", k=2, effort="low", max_tokens=100))
 COSTS = Costs(prices={"m": {"input": 2.0, "output": 10.0}}, batch_discount=0.5, assumed_output_tokens=500)
 
 
@@ -98,7 +98,7 @@ def test_resuming_never_writes_a_question_twice(tmp_path):
 def test_a_changed_config_starts_a_new_file_instead_of_mixing_answers(tmp_path):
     client = FakeClient()
     first = run_batch(client, RUN, _requests(), COSTS, tmp_path, poll_seconds=0)
-    changed = replace(RUN, effort="high")
+    changed = Writer(replace(RUN.config, effort="high"))
     second = run_batch(client, changed, _requests(changed), COSTS, tmp_path, poll_seconds=0)
     assert first != second and len(client.created) == 2 and len(_ids(first)) == len(_ids(second)) == 3
 
