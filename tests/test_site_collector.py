@@ -73,6 +73,6 @@ def test_collect_scores_every_setup_and_measures_noise_from_the_replicate_pair(t
 
 
 def test_collect_refuses_a_setup_that_has_not_run(tmp_path):
-    write_drafts(tmp_path)  # M1 drafts only: no critic or revise results, e.g. after a prompt change
+    write_drafts(tmp_path)  # first answers only: no critic or revise results, e.g. after a prompt change
     with pytest.raises(ValueError, match="has not run"):
         ResultsCollector(QasperSplit.load(FIXTURE), RunStore(tmp_path)).collect()

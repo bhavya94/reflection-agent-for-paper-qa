@@ -3,7 +3,7 @@
 # 10.1% of train's extractive and abstractive annotator answers are longer, so about 1 in 10 good answers is flagged.
 max_answer_words = 35
 
-# Reflection setups. Each takes one M1 run's answers as first drafts (writer = a run in configs/answering.toml) and
+# Reflection setups. Each takes one writer run's answers as first drafts (writer = a run in configs/answering.toml) and
 # revises the flagged ones once with the same writer model. critic = "none" means code feedback only: the checks'
 # findings go straight to the writer.
 [critic]

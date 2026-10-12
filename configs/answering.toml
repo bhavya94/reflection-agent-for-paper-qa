@@ -1,4 +1,5 @@
-# Writer runs for the M1 baselines. k paragraphs come from BM25 (src/reflective_qa/retrieval/bm25.py); k = 0 is closed-book.
+# Writer runs: the one-shot baselines. k paragraphs come from BM25 (src/reflective_qa/retrieval/bm25.py);
+# k = 0 is closed-book.
 # Effort is set explicitly because the defaults differ: high on Sonnet 5.5, medium on Haiku 5.5.
 max_tokens = 16000  # thinking counts toward it; billing is per generated token, so headroom is free
 
@@ -32,7 +33,7 @@ input = 0.10
 output = 0.50
 
 [sample]
-# A seeded random sample of text-only dev questions, shared by M1–M3 to fit the $20 API budget.
+# A seeded random sample of text-only dev questions, shared by every experiment to fit the $20 API budget.
 # Smaller samples are prefixes of larger ones, so a pilot's answers count toward the full run.
 questions = 200
 seed = 0
