@@ -4,7 +4,6 @@ the flagged drafts once. Each setup's files are named with a fingerprint of ever
 import argparse
 import hashlib
 import json
-import random
 import statistics
 import tomllib
 from dataclasses import asdict, dataclass
@@ -20,7 +19,8 @@ from reflective_qa.data.qasper import QasperSplit
 from reflective_qa.data.records import Paper, Paragraph, Question
 from reflective_qa.paths import DEV_SPLIT
 from reflective_qa.retrieval.bm25 import Retriever
-from reflective_qa.scoring import Prediction, answer_f1, is_unanswerable, score
+from reflective_qa.eval.analysis import Revision, RevisionAnalysis
+from reflective_qa.eval.scorer import Prediction, Scorer
 
 # The answer rules are repeated because the 20-question pilot showed revisions drifting long and hedged
 # ("Yes, partly: ..."), which the writer's system prompt alone did not prevent.
@@ -178,45 +178,22 @@ def report(split: QasperSplit, contexts: dict[str, Context], critiques: dict[str
     """Final answers scored like M1, plus what reflection did. better and worse compare answer-F1 per question,
     over the answers a revision actually changed."""
     final = final_answers(contexts, critiques, revisions)
-    to_prediction = lambda row: Prediction(row["predicted_answer"], tuple(row["predicted_evidence"]))
-    ids = set(contexts)
-    result = score(split, {qid: to_prediction(row) for qid, row in final.items()}, ids)
-    drafts = score(split, {qid: to_prediction(c.draft) for qid, c in contexts.items()}, ids)
-    changed = [qid for qid, c in contexts.items() if final[qid]["revised"]
-               and final[qid]["predicted_answer"] != c.draft["predicted_answer"]]
-    delta = {qid: answer_f1(contexts[qid].question, final[qid]["predicted_answer"])[0]
-             - answer_f1(contexts[qid].question, contexts[qid].draft["predicted_answer"])[0] for qid in changed}
+    scorer, ids = Scorer(split), set(contexts)
+    result = scorer.score({qid: Prediction.from_row(row) for qid, row in final.items()}, ids)
+    drafts = scorer.score({qid: Prediction.from_row(c.draft) for qid, c in contexts.items()}, ids)
+    changed = [r for r in revisions_of(contexts, final) if r.changed]
     verdicts = [r["verdict"] for r in critiques.values() if r["question_id"] in ids]
     return result | {"draft_answer_f1": drafts["answer_f1"], "critiques": len(verdicts),
                      "critic_revise": verdicts.count("revise"), "critic_errors": verdicts.count("error"),
                      "revisions": sum(qid in ids for qid in revisions), "revision_failures": sum(
                          r["status"] != "ok" for qid, r in revisions.items() if qid in ids),
-                     "changed": len(changed), "better": sum(d > 0 for d in delta.values()),
-                     "worse": sum(d < 0 for d in delta.values()), "cost": sum(row["cost"] for row in final.values())}
+                     "changed": len(changed), "better": sum(r.delta > 0 for r in changed),
+                     "worse": sum(r.delta < 0 for r in changed), "cost": sum(row["cost"] for row in final.values())}
 
 
-def revision_kind(before: str, after: str) -> str:
-    """How an answer changed: an abstention turned into an answer, an answer turned into an abstention, or a rewording."""
-    return ("abstain_to_answer" if is_unanswerable(before) and not is_unanswerable(after) else
-            "answer_to_abstain" if is_unanswerable(after) and not is_unanswerable(before) else "reworded")
-
-
-def analyze(contexts: dict[str, Context], final: dict[str, dict], resamples: int, seed: int) -> dict:
-    """How reflection moved answer-F1: the mean change per question with a paired-bootstrap 95% interval, and the
-    changed answers split by kind: an abstention turned into an answer, an answer turned into an abstention, or a
-    rewording."""
-    deltas = {q: answer_f1(c.question, final[q]["predicted_answer"])[0] - answer_f1(c.question, c.draft["predicted_answer"])[0]
-              for q, c in contexts.items()}
-    rng, values = random.Random(seed), list(deltas.values())
-    means = sorted(statistics.mean(rng.choices(values, k=len(values))) for _ in range(resamples))
-    kinds: dict[str, list[float]] = {"abstain_to_answer": [], "answer_to_abstain": [], "reworded": []}
-    for q, c in contexts.items():
-        before, after = c.draft["predicted_answer"], final[q]["predicted_answer"]
-        if before == after:
-            continue
-        kinds[revision_kind(before, after)].append(deltas[q])
-    return {"delta": statistics.mean(values), "ci": (means[int(0.025 * resamples)], means[int(0.975 * resamples) - 1]),
-            "kinds": {k: {"n": len(v), "mean_delta": statistics.mean(v) if v else 0.0} for k, v in kinds.items()}}
+def revisions_of(contexts: dict[str, Context], final: dict[str, dict]) -> list[Revision]:
+    """Each question's draft and final answer, in context order."""
+    return [Revision(c.question, c.draft["predicted_answer"], final[q]["predicted_answer"]) for q, c in contexts.items()]
 
 
 def _mean_output(rows: list[dict], default: float) -> float:
@@ -298,7 +275,8 @@ def main() -> None:
             print(f"{name}: done; run `report` to score it")
         else:
             r = report(split, contexts, critiques, revisions)
-            a = analyze(contexts, final_answers(contexts, critiques, revisions), analysis["bootstrap_resamples"], analysis["seed"])
+            a = RevisionAnalysis(analysis["bootstrap_resamples"], analysis["seed"]).analyze(
+                revisions_of(contexts, final_answers(contexts, critiques, revisions)))
             ran = has_run(setup, writer, contexts, critiques, revisions)
             status = (f"critic: {r['critiques']} reviews ({r['critic_revise']} revise, {r['critic_errors']} errors)  "
                       f"revisions: {r['revisions']} ({r['revision_failures']} failed), {r['changed']} changed: answer-F1 "

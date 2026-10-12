@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from reflective_qa.paths import CONFIGS
-from reflective_qa.scoring import is_unanswerable, normalize
+from reflective_qa.eval.metrics import is_unanswerable, normalize
 
 CONFIG = CONFIGS / "reflection.toml"
 # Starts with an auxiliary verb and offers no alternatives ("X or Y?"). On train: 97% recall, 0.82 precision for
@@ -62,7 +62,7 @@ if __name__ == "__main__":
     from reflective_qa.baselines import RUNS_DIR, read_answers, run_paths
     from reflective_qa.data.qasper import QasperSplit
     from reflective_qa.retrieval.bm25 import Retriever
-    from reflective_qa.scoring import answer_f1
+    from reflective_qa.eval.metrics import answer_f1
 
     split, max_words = QasperSplit.load(Path(sys.argv[1])), load_max_words()
     sample = tomllib.loads(ANSWERING.read_text())["sample"]

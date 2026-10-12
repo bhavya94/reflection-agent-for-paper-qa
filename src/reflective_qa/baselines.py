@@ -23,7 +23,7 @@ from reflective_qa.answering import (ANSWER_SCHEMA, CONFIG, SYSTEM, Answer, RunC
 from reflective_qa.data.qasper import QasperSplit
 from reflective_qa.paths import DEV_SPLIT, RUNS_DIR
 from reflective_qa.retrieval.bm25 import Retriever
-from reflective_qa.scoring import load_predictions, score
+from reflective_qa.eval.scorer import Scorer, load_predictions
 
 
 @dataclass(frozen=True)
@@ -91,7 +91,7 @@ def submit_and_collect(client: Any, requests: dict[str, dict], answers_path: Pat
 
 def run_batch(client: Any, run: RunConfig, requests: dict[str, dict], costs: Costs, out_dir: Path = RUNS_DIR,
               poll_seconds: float = 30) -> Path:
-    """Answers go to the run's JSON lines file, in the shape `scoring.load_predictions` reads."""
+    """Answers go to the run's JSON lines file, in the shape `load_predictions` reads."""
     answers_path, batch_path = run_paths(run, out_dir)
     return submit_and_collect(client, requests, answers_path, batch_path,
                               lambda qid, message: answer_record(parse_message(qid, message), run, costs), poll_seconds)
@@ -132,7 +132,7 @@ def report(run: RunConfig, requests: dict[str, dict], split: QasperSplit, out_di
     """Scores a run on its own question sample, so questions outside the sample don't count as zeros."""
     answers_path = run_paths(run, out_dir)[0]
     rows = read_answers(answers_path)
-    result = score(split, load_predictions(answers_path) if rows else {}, set(requests))
+    result = Scorer(split).score(load_predictions(answers_path) if rows else {}, set(requests))
     return result | {"run": run.name, "file": answers_path.name, "cost": sum(r["cost"] for r in rows),
                      "output_tokens": statistics.mean(r["output_tokens"] for r in rows) if rows else 0}
 

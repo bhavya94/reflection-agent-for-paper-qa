@@ -2,8 +2,8 @@ import json
 from pathlib import Path
 
 from reflective_qa.data.qasper import QasperSplit
-from reflective_qa.scoring import (Prediction, answer_f1, evidence_f1, is_unanswerable, load_predictions, normalize,
-                                   score, token_f1)
+from reflective_qa.eval.metrics import answer_f1, evidence_f1, is_unanswerable, normalize, token_f1
+from reflective_qa.eval.scorer import Prediction, Scorer, load_predictions
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mini_qasper.json"
 
@@ -39,12 +39,12 @@ def test_abstentions_are_recognized_after_normalization():
 
 
 def test_only_text_only_questions_count_and_missing_ones_score_zero():
-    result = score(QasperSplit.load(FIXTURE), {"q-abstractive": Prediction("a tiny model", ("s0p0",)),
+    result = Scorer(QasperSplit.load(FIXTURE)).score( {"q-abstractive": Prediction("a tiny model", ("s0p0",)),
                                          "q-figure": Prediction("90%", ())})
     assert result["questions"] == 3 and result["missing"] == 2  # q-figure is not a text-only question
     assert result["answer_f1"] == result["evidence_f1"] == 1 / 3  # missing predictions score 0 on both
     assert result["evidence_questions"] == 3 and result["predicted_unanswerable"] == 0.0
-    abstained = score(QasperSplit.load(FIXTURE), {"q-boolean": Prediction("unanswerable.", ())})
+    abstained = Scorer(QasperSplit.load(FIXTURE)).score( {"q-boolean": Prediction("unanswerable.", ())})
     assert abstained["predicted_unanswerable"] == 1.0
 
 
@@ -55,5 +55,5 @@ def test_predictions_load_from_jsonl_with_paragraph_id_evidence(tmp_path):
 
 
 def test_scoring_can_be_limited_to_a_question_sample():
-    result = score(QasperSplit.load(FIXTURE), {"q-abstractive": Prediction("a tiny model", ("s0p0",))}, {"q-abstractive"})
+    result = Scorer(QasperSplit.load(FIXTURE)).score( {"q-abstractive": Prediction("a tiny model", ("s0p0",))}, {"q-abstractive"})
     assert (result["questions"], result["missing"], result["answer_f1"]) == (1, 0, 1.0)

@@ -27,7 +27,7 @@ def test_answer_text_and_type_match_the_official_evaluator_on_dev():
 
 
 def test_answer_f1_matches_the_official_evaluator_on_dev():
-    from reflective_qa.scoring import Prediction, score
+    from reflective_qa.eval.scorer import Prediction, Scorer
 
     spec = importlib.util.spec_from_file_location("qasper_evaluator", EVALUATOR)
     evaluator = importlib.util.module_from_spec(spec)
@@ -42,7 +42,7 @@ def test_answer_f1_matches_the_official_evaluator_on_dev():
     gold = evaluator.get_answers_and_evidence(json.loads(DEV.read_text()), text_evidence_only=True)
     official = evaluator.evaluate({q.id: gold[q.id] for q in questions},
                                   {qid: {"answer": p.answer, "evidence": []} for qid, p in predictions.items()})
-    ours = score(split, predictions)
+    ours = Scorer(split).score(predictions)
     assert abs(ours["answer_f1"] - official["Answer F1"]) < 1e-12
     assert set(ours["answer_f1_by_type"]) == set(official["Answer F1 by type"])  # all four types present
     assert ours["answer_f1_by_type"] == pytest.approx(official["Answer F1 by type"], abs=1e-12)
