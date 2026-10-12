@@ -68,5 +68,23 @@ uv run rqa baselines report                                            # score e
 uv run rqa checks                                                      # code checks on the M1 drafts
 uv run --env-file .env rqa reflect run sonnet-self-critique --max-dollars 1.50   # one setup
 uv run rqa reflect report                                              # every setup vs. its drafts
+uv run rqa site                                                        # the results page, into site/index.html
 uv run pytest
 ```
+
+## Code layout
+
+One package per responsibility under `src/reflective_qa/`. Imports only point down, with no cycles: `data` is at the
+bottom; `retrieval` and `eval` build on it; `agent` uses those three; `runs` knows only files and the API;
+`experiments` wire the agent, runs and eval together; `site` and `cli` sit on top. `tests/test_layers.py` enforces it.
+
+| Package | What lives there |
+|---|---|
+| `data/` | QASPER records, `QasperSplit` (lookups and the seeded question sample), the download |
+| `retrieval/` | BM25: `PaperRetriever`, `Retriever` (one index per paper), `RecallEvaluator` |
+| `agent/` | `Writer`, `CodeChecks`, `Critic`, `ReflectionAgent`: they build requests and read replies, no files or network |
+| `runs/` | `RunStore` (run files named by fingerprint), `BatchRunner` (Batch API, budget guard), `Costs`, `CostEstimator` |
+| `eval/` | answer-F1 and evidence-F1 (pure functions), `Scorer`, `RevisionAnalysis` (paired bootstrap) |
+| `experiments/` | `BaselineExperiment`, `ReflectionExperiment`: they wire the agent, run files and scorer for one kind of run |
+| `site/` | `ResultsCollector` and the self-contained results page |
+| `cli.py` | the `rqa` command, the only module that parses arguments or prints |

@@ -9,7 +9,7 @@ from reflective_qa.agent.writer import Writer
 from reflective_qa.data.qasper import QasperSplit
 from reflective_qa.experiments.reflection import ReflectionExperiment
 from reflective_qa.runs.store import RunStore
-from reflective_qa.site_data import collect, contributions, pick_examples
+from reflective_qa.site.collector import ResultsCollector, contributions, pick_examples
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mini_qasper.json"
 DRAFTS = {"q-extractive": "Foo, Bar and a long list of other things", "q-abstractive": "Unanswerable", "q-boolean": "No"}
@@ -62,7 +62,7 @@ def test_collect_scores_every_setup_and_measures_noise_from_the_replicate_pair(t
         write_rows(paths["revise"][0], [{"question_id": "q-abstractive", "status": "ok", "cost": 0.03,
                                          "predicted_answer": "a tiny model" if fixed else "Unanswerable",
                                          "predicted_evidence": []}])
-    data = collect(QasperSplit.load(FIXTURE), tmp_path)
+    data = ResultsCollector(QasperSplit.load(FIXTURE), RunStore(tmp_path)).collect()
     setups = {row["name"]: row for row in data["setups"]}
     assert setups["haiku-sonnet-critic-checks"]["delta"] == pytest.approx(1 / 3)  # 0 -> 1 on one of three questions
     assert setups["haiku-sonnet-critic"]["delta"] == 0
@@ -75,4 +75,4 @@ def test_collect_scores_every_setup_and_measures_noise_from_the_replicate_pair(t
 def test_collect_refuses_a_setup_that_has_not_run(tmp_path):
     write_drafts(tmp_path)  # M1 drafts only: no critic or revise results, e.g. after a prompt change
     with pytest.raises(ValueError, match="has not run"):
-        collect(QasperSplit.load(FIXTURE), tmp_path)
+        ResultsCollector(QasperSplit.load(FIXTURE), RunStore(tmp_path)).collect()
