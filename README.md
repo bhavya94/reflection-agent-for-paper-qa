@@ -82,9 +82,9 @@ bottom; `retrieval` and `eval` build on it; `agent` uses those three; `runs` kno
 |---|---|
 | `data/` | QASPER records, `QasperSplit` (lookups and the seeded question sample), the download |
 | `retrieval/` | BM25: `PaperRetriever`, `Retriever` (one index per paper), `RecallEvaluator` |
-| `agent/` | `Writer`, `CodeChecks`, `Critic`, `ReflectionAgent`: they build requests and read replies, no files or network |
+| `agent/` | `Writer`, `CodeChecks`, `Critic`, `ReflectionAgent`: they build requests and read replies; no API calls, no writes |
 | `runs/` | `RunStore` (run files named by fingerprint), `BatchRunner` (Batch API, budget guard), `Costs`, `CostEstimator` |
 | `eval/` | answer-F1 and evidence-F1 (pure functions), `Scorer`, `RevisionAnalysis` (paired bootstrap) |
-| `experiments/` | `BaselineExperiment`, `ReflectionExperiment`: they wire the agent, run files and scorer for one kind of run |
+| `experiments/` | `Experiment` (shared sample, run files, prices, API client), `BaselineExperiment`, `ReflectionExperiment` |
 | `site/` | `ResultsCollector` and the self-contained results page |
 | `cli.py` | the `rqa` command, the only module that parses arguments or prints |
