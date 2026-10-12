@@ -7,9 +7,9 @@ from reflective_qa.answering import CONFIG as ANSWERING, load_runs
 from reflective_qa.baselines import RUNS_DIR, build_requests, report as baseline_report, total_spent
 from reflective_qa.checks import CONFIG as REFLECTION, load_max_words
 from reflective_qa.data.qasper import QasperSplit
-from reflective_qa.reflection import (Context, analyze, build_contexts, final_answers, has_run, load_setups, read_stage,
-                                      report, revision_kind, stage_paths)
-from reflective_qa.scoring import answer_f1
+from reflective_qa.eval.analysis import RevisionAnalysis
+from reflective_qa.reflection import (Context, build_contexts, final_answers, has_run, load_setups, read_stage, report,
+                                      revisions_of, stage_paths)
 
 KIND_LABELS = {"abstain_to_answer": "Unanswerable → answer", "answer_to_abstain": "Answer → Unanswerable",
                "reworded": "Reworded"}
@@ -25,19 +25,16 @@ def pick_examples(cases: list[tuple[str, dict[str, Context], dict[str, dict]]]) 
     rewording, the largest loss."""
     best: dict[str, tuple[float, dict]] = {}
     for setup, contexts, final in cases:
-        for qid, c in contexts.items():
-            before, after = c.draft["predicted_answer"], final[qid]["predicted_answer"]
-            if before == after:
+        for r in revisions_of(contexts, final):
+            if not r.changed:
                 continue
-            f1 = (answer_f1(c.question, before)[0], answer_f1(c.question, after)[0])
-            delta = f1[1] - f1[0]
-            kind = revision_kind(before, after)
-            if kind == "reworded" and len(after.split()) < len(before.split()) and delta > 0:
+            kind = r.kind
+            if kind == "reworded" and len(r.after.split()) < len(r.before.split()) and r.delta > 0:
                 kind = "shortened"
-            strength = -delta if kind == "reworded" else delta
+            strength = -r.delta if kind == "reworded" else r.delta
             if strength > 0 and (kind not in best or strength > best[kind][0]):
-                best[kind] = (strength, {"question": c.question.text, "before": before, "after": after, "f1": f1, "delta": delta,
-                                         "gold": [a.text for a in c.question.answers], "setup": setup})
+                best[kind] = (strength, {"question": r.question.text, "before": r.before, "after": r.after, "f1": r.f1,
+                                         "delta": r.delta, "gold": [a.text for a in r.question.answers], "setup": setup})
     return {kind: example for kind, (_, example) in best.items()}
 
 
@@ -61,7 +58,7 @@ def collect(split: QasperSplit, runs_dir: Path = RUNS_DIR) -> dict:
             raise ValueError(f"{name} has not run with the current code and config; run it before building the page")
         final = final_answers(contexts, critiques, revisions)
         r = report(split, contexts, critiques, revisions)
-        a = analyze(contexts, final, analysis_config["bootstrap_resamples"], analysis_config["seed"])
+        a = RevisionAnalysis(analysis_config["bootstrap_resamples"], analysis_config["seed"]).analyze(revisions_of(contexts, final))
         setups.append({"name": name, "writer": setup.writer, "critic": setup.critic.model if setup.critic else None,
                        "code_feedback": setup.critic is None or setup.critic.code_feedback,
                        "before": r["draft_answer_f1"], "after": r["answer_f1"], "delta": a["delta"], "ci": list(a["ci"]),

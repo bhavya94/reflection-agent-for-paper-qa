@@ -62,7 +62,7 @@ uv sync
 uv run rqa download                                                    # QASPER train/dev + official evaluator, checksum-verified
 uv run rqa stats                                                       # dev split summary
 uv run rqa recall                                                      # BM25 evidence recall@k
-uv run python -m reflective_qa.scoring data/raw/qasper-dev-v0.3.json predictions.jsonl   # answer-F1 (official) + paragraph-ID evidence-F1
+uv run rqa score predictions.jsonl                                     # answer-F1 (official) + paragraph-ID evidence-F1
 uv run --env-file .env python -m reflective_qa.baselines run sonnet-k20 --max-dollars 1.50   # needs ANTHROPIC_API_KEY in .env
 uv run python -m reflective_qa.baselines report                                  # score every run on its sample
 uv run python -m reflective_qa.checks data/raw/qasper-dev-v0.3.json    # code checks on the M1 drafts
