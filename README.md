@@ -59,9 +59,9 @@ One round of reflection on the M1 drafts, same 200 questions, run 2026-10-11 for
 
 ```bash
 uv sync
-uv run python -m reflective_qa.download                                # QASPER train/dev + official evaluator, checksum-verified
-uv run python -m reflective_qa.stats data/raw/qasper-dev-v0.3.json     # dev split summary
-uv run python -m reflective_qa.retrieval_eval data/raw/qasper-dev-v0.3.json   # BM25 evidence recall@k
+uv run rqa download                                                    # QASPER train/dev + official evaluator, checksum-verified
+uv run rqa stats                                                       # dev split summary
+uv run rqa recall                                                      # BM25 evidence recall@k
 uv run python -m reflective_qa.scoring data/raw/qasper-dev-v0.3.json predictions.jsonl   # answer-F1 (official) + paragraph-ID evidence-F1
 uv run --env-file .env python -m reflective_qa.baselines run sonnet-k20 --max-dollars 1.50   # needs ANTHROPIC_API_KEY in .env
 uv run python -m reflective_qa.baselines report                                  # score every run on its sample

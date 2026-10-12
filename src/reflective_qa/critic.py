@@ -7,7 +7,7 @@ from typing import Any
 
 from reflective_qa.answering import passages_block
 from reflective_qa.checks import Finding
-from reflective_qa.data import Paper, Paragraph, Question
+from reflective_qa.data.records import Paper, Paragraph, Question
 
 CHECKLIST = {
     "unsupported": "A claim in the answer is not supported by the cited passages.",

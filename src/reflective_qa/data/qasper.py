@@ -5,72 +5,43 @@ scored here and there agree. Gold evidence is mapped to paragraph ids for retrie
 """
 
 import json
+import random
 import re
-from dataclasses import dataclass
-from enum import StrEnum
 from pathlib import Path
 
+from reflective_qa.data.records import UNANSWERABLE, Answer, AnswerType, Paper, Paragraph, Question
+
 FIGURE_OR_TABLE_MARKER = "FLOAT SELECTED"
-UNANSWERABLE = "Unanswerable"
 
 
-class AnswerType(StrEnum):
-    """Values match the official evaluator's type names."""
+class QasperSplit:
+    """One released split (train or dev): its papers, a lookup by paper ID, and the seeded question sample that
+    every experiment shares."""
 
-    EXTRACTIVE = "extractive"
-    ABSTRACTIVE = "abstractive"
-    BOOLEAN = "boolean"
-    NONE = "none"
+    def __init__(self, papers: list[Paper]):
+        self.papers = papers
+        self._by_id = {paper.id: paper for paper in papers}
 
+    @classmethod
+    def load(cls, path: Path) -> "QasperSplit":
+        raw = json.loads(path.read_text())
+        return cls([_parse_paper(paper_id, paper) for paper_id, paper in raw.items()])
 
-@dataclass(frozen=True)
-class Paragraph:
-    id: str
-    section: str
-    text: str
+    def paper(self, paper_id: str) -> Paper:
+        return self._by_id[paper_id]
 
+    def questions(self) -> list[Question]:
+        return [q for paper in self.papers for q in paper.questions]
 
-@dataclass(frozen=True)
-class Answer:
-    text: str
-    type: AnswerType
-    evidence_ids: tuple[str, ...]
-    """Ids of the paragraphs the annotator selected as evidence."""
-    other_evidence: tuple[str, ...]
-    """Evidence that matches no paragraph. In QASPER v0.3 these are all section headings."""
-    uses_figure_or_table: bool
+    def text_only_questions(self) -> list[Question]:
+        return [q for q in self.questions() if q.text_only]
 
-
-@dataclass(frozen=True)
-class Question:
-    id: str
-    paper_id: str
-    text: str
-    answers: tuple[Answer, ...]
-
-    @property
-    def text_only(self) -> bool:
-        """True when no annotator needed a figure or table to answer."""
-        return not any(answer.uses_figure_or_table for answer in self.answers)
-
-
-@dataclass(frozen=True)
-class Paper:
-    id: str
-    title: str
-    abstract: str
-    paragraphs: tuple[Paragraph, ...]
-    questions: tuple[Question, ...]
-
-
-def load_split(path: Path) -> list[Paper]:
-    """Load one released QASPER JSON file (train or dev)."""
-    raw = json.loads(path.read_text())
-    return [_parse_paper(paper_id, paper) for paper_id, paper in raw.items()]
-
-
-def text_only_questions(papers: list[Paper]) -> list[Question]:
-    return [q for paper in papers for q in paper.questions if q.text_only]
+    def sample(self, n: int | None, seed: int) -> list[Question]:
+        """A seeded shuffle of the text-only questions, cut to n (all if n is None). Smaller samples are prefixes of
+        larger ones, so a pilot's answers are reused."""
+        order = sorted(self.text_only_questions(), key=lambda q: q.id)
+        random.Random(seed).shuffle(order)
+        return order[:n]
 
 
 def _normalize(text: str) -> str:

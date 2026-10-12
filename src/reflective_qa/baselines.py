@@ -11,7 +11,6 @@ Money safety:
 import argparse
 import hashlib
 import json
-import random
 import statistics
 import time
 import tomllib
@@ -21,11 +20,10 @@ from typing import Any, Callable
 
 from reflective_qa.answering import (ANSWER_SCHEMA, CONFIG, SYSTEM, Answer, RunConfig, build_request, load_runs,
                                      parse_message)
-from reflective_qa.data import Paper, Question, load_split, text_only_questions
-from reflective_qa.retrieval import PaperRetriever
+from reflective_qa.data.qasper import QasperSplit
+from reflective_qa.paths import DEV_SPLIT, RUNS_DIR
+from reflective_qa.retrieval.bm25 import Retriever
 from reflective_qa.scoring import load_predictions, score
-
-RUNS_DIR = Path(__file__).resolve().parents[2] / "data" / "runs"
 
 
 @dataclass(frozen=True)
@@ -53,25 +51,10 @@ def run_paths(run: RunConfig, out_dir: Path) -> tuple[Path, Path]:
     return out_dir / f"{stem}.jsonl", out_dir / f"{stem}.batch"
 
 
-def sample_questions(questions: list[Question], n: int | None, seed: int) -> list[Question]:
-    """A seeded shuffle, cut to n. Smaller samples are prefixes of larger ones, so a pilot's answers are reused."""
-    order = sorted(questions, key=lambda q: q.id)
-    random.Random(seed).shuffle(order)
-    return order[:n]
-
-
-def build_requests(run: RunConfig, papers: list[Paper], n: int | None = None, seed: int = 0) -> dict[str, dict]:
+def build_requests(run: RunConfig, split: QasperSplit, n: int | None = None, seed: int = 0) -> dict[str, dict]:
     """Request parameters keyed by question ID, for a seeded sample of n text-only questions (all if n is None)."""
-    by_id = {paper.id: paper for paper in papers}
-    retrievers: dict[str, PaperRetriever] = {}
-    requests = {}
-    for question in sample_questions(text_only_questions(papers), n, seed):
-        paper = by_id[question.paper_id]
-        if paper.id not in retrievers:
-            retrievers[paper.id] = PaperRetriever(paper)
-        passages = retrievers[paper.id].retrieve(question.text, run.k) if run.k else []
-        requests[question.id] = build_request(run, paper, question, passages)
-    return requests
+    retriever = Retriever(split)
+    return {q.id: build_request(run, split.paper(q.paper_id), q, retriever.retrieve(q, run.k)) for q in split.sample(n, seed)}
 
 
 def read_answers(path: Path) -> list[dict]:
@@ -145,11 +128,11 @@ def estimate(client: Any, run: RunConfig, requests: dict[str, dict], costs: Cost
             "dollars": costs.dollars(run.model, input_mean * len(ids), output * len(ids))}
 
 
-def report(run: RunConfig, requests: dict[str, dict], papers: list[Paper], out_dir: Path = RUNS_DIR) -> dict:
+def report(run: RunConfig, requests: dict[str, dict], split: QasperSplit, out_dir: Path = RUNS_DIR) -> dict:
     """Scores a run on its own question sample, so questions outside the sample don't count as zeros."""
     answers_path = run_paths(run, out_dir)[0]
     rows = read_answers(answers_path)
-    result = score(papers, load_predictions(answers_path) if rows else {}, set(requests))
+    result = score(split, load_predictions(answers_path) if rows else {}, set(requests))
     return result | {"run": run.name, "file": answers_path.name, "cost": sum(r["cost"] for r in rows),
                      "output_tokens": statistics.mean(r["output_tokens"] for r in rows) if rows else 0}
 
@@ -164,19 +147,19 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["estimate", "run", "report"])
     parser.add_argument("runs", nargs="*", help="run names from configs/answering.toml; default: all")
-    parser.add_argument("--dev", type=Path, default=RUNS_DIR.parent / "raw" / "qasper-dev-v0.3.json")
+    parser.add_argument("--dev", type=Path, default=DEV_SPLIT)
     parser.add_argument("--questions", type=int, help="size of the seeded question sample; default: the config's")
     parser.add_argument("--max-dollars", type=float, help="required for run: refuse if the estimate is higher")
     args = parser.parse_args()
     config = tomllib.loads(CONFIG.read_text())["sample"]
     n = args.questions or config["questions"]
-    papers, costs, runs = load_split(args.dev), load_costs(), load_runs()
+    split, costs, runs = QasperSplit.load(args.dev), load_costs(), load_runs()
     client = anthropic.Anthropic() if args.command != "report" else None
     for name in args.runs or runs:
         run = runs[name]
-        requests = build_requests(run, papers, n, config["seed"])
+        requests = build_requests(run, split, n, config["seed"])
         if args.command == "report":
-            r = report(run, requests, papers)
+            r = report(run, requests, split)
             by_type = "  ".join(f"{t} {f1:.3f}" for t, f1 in r["answer_f1_by_type"].items())
             print(f"{r['run']:20} {r['questions'] - r['missing']}/{r['questions']} answered  answer-F1 {r['answer_f1']:.3f}  "
                   f"evidence-F1 {r['evidence_f1']:.3f}  unanswerable {r['predicted_unanswerable']:.1%}  "

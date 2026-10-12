@@ -8,7 +8,7 @@ from reflective_qa.answering import RunConfig, load_runs
 from reflective_qa.baselines import run_paths
 from reflective_qa.checks import Finding
 from reflective_qa.critic import CriticConfig
-from reflective_qa.data import load_split
+from reflective_qa.data.qasper import QasperSplit
 from reflective_qa.reflection import (REVISE_INSTRUCTION, Setup, build_contexts, critic_requests, fingerprint,
                                       load_setups, problems, revise_request)
 
@@ -19,11 +19,11 @@ SONNET = CriticConfig("claude-sonnet-5-5", "medium", 100, code_feedback=False)
 
 def _contexts(tmp_path, setup, answer="Foo"):
     """Drafts for every fixture question, written where the setup's writer run keeps its answers."""
-    papers = load_split(FIXTURE)
+    split = QasperSplit.load(FIXTURE)
     drafts = run_paths(load_runs()[setup.writer], tmp_path)[0]
     drafts.write_text("".join(json.dumps({"question_id": q.id, "predicted_answer": answer, "predicted_evidence": ["s1p0"]}) + "\n"
-                              for paper in papers for q in paper.questions))
-    return build_contexts(setup, papers, n=None, seed=0, max_words=3, runs_dir=tmp_path)
+                              for q in split.questions()))
+    return build_contexts(setup, split, n=None, seed=0, max_words=3, runs_dir=tmp_path)
 
 
 def test_the_five_planned_setups_cover_both_writers():
@@ -56,11 +56,11 @@ def test_the_word_limit_counts_only_where_findings_are_shown():
 
 
 def test_a_sampled_question_without_a_draft_is_an_error(tmp_path):
-    papers = load_split(FIXTURE)
+    split = QasperSplit.load(FIXTURE)
     run_paths(load_runs()["haiku-k5"], tmp_path)[0].write_text(
         json.dumps({"question_id": "q-extractive", "predicted_answer": "Foo", "predicted_evidence": []}) + "\n")
     with pytest.raises(ValueError, match="no draft for 2 of 3"):
-        build_contexts(Setup("s", "haiku-k5", None), papers, n=None, seed=0, max_words=3, runs_dir=tmp_path)
+        build_contexts(Setup("s", "haiku-k5", None), split, n=None, seed=0, max_words=3, runs_dir=tmp_path)
 
 
 def test_contexts_carry_the_draft_and_the_check_findings(tmp_path):

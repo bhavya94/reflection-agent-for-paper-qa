@@ -1,16 +1,13 @@
 """Summarize a loaded QASPER split: question counts, answer types, and how much evidence maps to paragraphs."""
 
 import statistics
-import sys
 from collections import Counter
-from pathlib import Path
 
-from reflective_qa.data import Paper, text_only_questions
+from reflective_qa.data.qasper import QasperSplit
 
 
-def summarize(papers: list[Paper]) -> dict:
-    questions = [q for paper in papers for q in paper.questions]
-    text_only = text_only_questions(papers)
+def summarize(split: QasperSplit) -> dict:
+    papers, questions, text_only = split.papers, split.questions(), split.text_only_questions()
     answers = [a for q in text_only for a in q.answers]
     paragraph_chars = [len(p.text) for paper in papers for p in paper.paragraphs]
     return {
@@ -24,10 +21,3 @@ def summarize(papers: list[Paper]) -> dict:
         "paragraphs_per_paper_median": statistics.median(len(paper.paragraphs) for paper in papers),
         "paragraph_chars_median": statistics.median(paragraph_chars),
     }
-
-
-if __name__ == "__main__":
-    from reflective_qa.data import load_split
-
-    for key, value in summarize(load_split(Path(sys.argv[1]))).items():
-        print(f"{key:32} {value}")

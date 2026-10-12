@@ -2,7 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from reflective_qa.answering import Answer, RunConfig, build_request, load_runs, parse_message
-from reflective_qa.data import load_split
+from reflective_qa.data.qasper import QasperSplit
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mini_qasper.json"
 RUN = RunConfig(name="test", model="claude-haiku-5-5", k=2, effort="low", max_tokens=100)
@@ -15,7 +15,7 @@ def _reply(text: str, stop_reason: str = "end_turn"):
 
 
 def test_request_labels_each_passage_with_its_id_and_ends_with_the_question():
-    (paper,) = load_split(FIXTURE)
+    (paper,) = QasperSplit.load(FIXTURE).papers
     question = paper.questions[0]
     request = build_request(RUN, paper, question, list(paper.paragraphs[2:4]))
     prompt = request["messages"][0]["content"]
@@ -26,7 +26,7 @@ def test_request_labels_each_passage_with_its_id_and_ends_with_the_question():
 
 
 def test_closed_book_request_has_no_passages_and_asks_for_a_best_guess():
-    (paper,) = load_split(FIXTURE)
+    (paper,) = QasperSplit.load(FIXTURE).papers
     prompt = build_request(RUN, paper, paper.questions[0], [])["messages"][0]["content"]
     assert "No passages are given. Give your best guess" in prompt and "[s" not in prompt
 

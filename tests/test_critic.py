@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from reflective_qa.checks import Finding
 from reflective_qa.critic import CHECKLIST, SCHEMA, SYSTEM, CriticConfig, Critique, build_critic_request, parse_critique
-from reflective_qa.data import load_split
+from reflective_qa.data.qasper import QasperSplit
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mini_qasper.json"
 CRITIC = CriticConfig(model="claude-sonnet-5-5", effort="medium", max_tokens=100, code_feedback=True)
@@ -12,7 +12,7 @@ FINDINGS = [Finding("too_long", "40 words. Use the shortest phrase that answers 
 
 
 def _request(critic=CRITIC, findings=FINDINGS):
-    (paper,) = load_split(FIXTURE)
+    (paper,) = QasperSplit.load(FIXTURE).papers
     return build_critic_request(critic, paper, paper.questions[0], list(paper.paragraphs[2:4]), "Foo", ("s1p0",), findings)
 
 

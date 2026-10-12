@@ -7,7 +7,7 @@ import pytest
 
 from reflective_qa.baselines import Costs, answer_record, read_answers, run_paths, submit_and_collect
 from reflective_qa.critic import SYSTEM as CRITIC_SYSTEM, CriticConfig
-from reflective_qa.data import load_split
+from reflective_qa.data.qasper import QasperSplit
 from reflective_qa.answering import build_request, parse_message
 from reflective_qa.reflection import (Setup, analyze, build_contexts, critic_requests, critique_record, estimate_setup,
                                       final_answers, report, revise_request, revise_requests, run_setup)
@@ -48,12 +48,12 @@ class FakeBatches:
 
 
 def _setup_drafts(tmp_path):
-    papers = load_split(FIXTURE)
+    split = QasperSplit.load(FIXTURE)
     writer = load_runs()["haiku-k5"]
     run_paths(writer, tmp_path)[0].write_text("".join(
         json.dumps({"question_id": q.id, "predicted_answer": "a tiny model with many words", "predicted_evidence": ["s0p0"],
-                    "output_tokens": 50}) + "\n" for paper in papers for q in paper.questions))
-    return papers, writer, build_contexts(SETUP, papers, None, 0, 35, runs_dir=tmp_path)
+                    "output_tokens": 50}) + "\n" for q in split.questions()))
+    return split, writer, build_contexts(SETUP, split, None, 0, 35, runs_dir=tmp_path)
 
 
 def _paths(tmp_path):
