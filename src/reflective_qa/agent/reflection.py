@@ -48,6 +48,12 @@ class ReflectionAgent:
         self.setup, self.writer, self.checks = setup, writer, checks
         self.critic = Critic(setup.critic) if setup.critic else None
 
+    @classmethod
+    def load_all(cls) -> dict[str, "ReflectionAgent"]:
+        """One agent per setup in configs/reflection.toml, with its writer run and the configured code checks."""
+        writers, checks = Writer.load_all(), CodeChecks.from_config()
+        return {name: cls(setup, writers[setup.writer], checks) for name, setup in Setup.load_all().items()}
+
     @property
     def name(self) -> str:
         return self.setup.name

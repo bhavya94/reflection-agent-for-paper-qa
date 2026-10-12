@@ -2,8 +2,7 @@
 fingerprint unchanged, or the code stops finding answers that were already paid for. A deliberate prompt or config
 change does change them: update these values on purpose, and expect new run files."""
 
-from reflective_qa.agent.checks import CodeChecks
-from reflective_qa.agent.reflection import ReflectionAgent, Setup
+from reflective_qa.agent.reflection import ReflectionAgent
 from reflective_qa.agent.writer import Writer
 
 RUNS = {"sonnet-k20": "b8ad8d4550", "sonnet-closed-book": "12d27ad1ae", "haiku-k5": "67a813f46f"}
@@ -17,5 +16,4 @@ def test_writer_run_fingerprints_are_unchanged():
 
 
 def test_reflection_setup_fingerprints_are_unchanged():
-    writers, checks = Writer.load_all(), CodeChecks.from_config()
-    assert {name: ReflectionAgent(s, writers[s.writer], checks).fingerprint for name, s in Setup.load_all().items()} == SETUPS
+    assert {name: agent.fingerprint for name, agent in ReflectionAgent.load_all().items()} == SETUPS
