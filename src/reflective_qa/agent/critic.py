@@ -2,7 +2,7 @@
 lists problems from a fixed checklist that the writer can act on."""
 
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from reflective_qa.agent.checks import Finding
@@ -65,6 +65,11 @@ class Critique:
     status: str
     input_tokens: int
     output_tokens: int
+
+    def to_row(self, cost: float) -> dict:
+        return {"question_id": self.question_id, "verdict": self.verdict, "problems": [asdict(f) for f in self.problems],
+                "status": self.status, "model": self.model, "input_tokens": self.input_tokens,
+                "output_tokens": self.output_tokens, "cost": cost}
 
 
 class Critic:

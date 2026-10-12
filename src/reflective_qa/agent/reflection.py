@@ -10,7 +10,6 @@ from reflective_qa.agent.checks import CodeChecks, Finding
 from reflective_qa.agent.critic import Critic, CriticConfig
 from reflective_qa.agent.writer import Writer
 from reflective_qa.data.records import Paper, Paragraph, Question
-from reflective_qa.eval.analysis import Revision
 from reflective_qa.paths import load_config
 
 
@@ -105,20 +104,3 @@ class ReflectionAgent:
         answer = " ".join(["word"] * 60)  # fixed, so the draft text never depends on the word limit
         draft = {"question_id": "probe", "predicted_answer": answer, "predicted_evidence": ["s9p9"], "status": "ok"}
         return self.context(Paper("probe", "Probe paper", "", tuple(paragraphs), (question,)), question, paragraphs, draft)
-
-    @staticmethod
-    def final_answers(contexts: dict[str, Context], critiques: dict[str, dict], revisions: dict[str, dict]) -> dict[str, dict]:
-        """The revision where one succeeded, else the draft; with the cost of reflecting, not of the draft."""
-        final = {}
-        for qid, c in contexts.items():
-            revised = revisions.get(qid)
-            use = revised if revised and revised["status"] == "ok" else c.draft
-            cost = (critiques.get(qid) or {}).get("cost", 0.0) + (revised or {}).get("cost", 0.0)
-            final[qid] = {"question_id": qid, "predicted_answer": use["predicted_answer"],
-                          "predicted_evidence": use["predicted_evidence"], "revised": use is revised, "cost": cost}
-        return final
-
-    @staticmethod
-    def revisions(contexts: dict[str, Context], final: dict[str, dict]) -> list[Revision]:
-        """Each question's draft and final answer, in context order."""
-        return [Revision(c.question, c.draft["predicted_answer"], final[q]["predicted_answer"]) for q, c in contexts.items()]
