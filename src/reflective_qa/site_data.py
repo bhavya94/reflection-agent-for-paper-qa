@@ -5,11 +5,11 @@ from pathlib import Path
 from reflective_qa.agent.checks import CodeChecks
 from reflective_qa.agent.reflection import Context, ReflectionAgent, Setup
 from reflective_qa.agent.writer import Writer
-from reflective_qa.baselines import RUNS_DIR, build_requests, report as baseline_report, total_spent
 from reflective_qa.data.qasper import QasperSplit
-from reflective_qa.eval.analysis import RevisionAnalysis
-from reflective_qa.paths import load_config
-from reflective_qa.reflection import build_contexts, has_run, read_stage, report, stage_paths
+from reflective_qa.experiments.baseline import BaselineExperiment
+from reflective_qa.experiments.reflection import ReflectionExperiment
+from reflective_qa.paths import RUNS_DIR, load_config
+from reflective_qa.runs.store import RunStore
 
 KIND_LABELS = {"abstain_to_answer": "Unanswerable → answer", "answer_to_abstain": "Answer → Unanswerable",
                "reworded": "Reworded"}
@@ -39,26 +39,25 @@ def pick_examples(cases: list[tuple[str, dict[str, Context], dict[str, dict]]]) 
 
 
 def collect(split: QasperSplit, runs_dir: Path = RUNS_DIR) -> dict:
-    sample, analysis_config = load_config("answering")["sample"], load_config("reflection")["analysis"]
+    store = RunStore(runs_dir)
+    baseline, reflection = BaselineExperiment.from_config(split, store), ReflectionExperiment.from_config(split, store)
     checks, writers = CodeChecks.from_config(), Writer.load_all()
     baselines = []
     for name, writer in writers.items():
-        r = baseline_report(writer, build_requests(writer, split, sample["questions"], sample["seed"]), split, runs_dir)
+        r = baseline.report(writer, baseline.requests(writer))
         baselines.append({"name": name, "model": writer.model, "k": writer.k, "answer_f1": r["answer_f1"],
                           "evidence_f1": r["evidence_f1"] if writer.k else None,
                           "unanswerable": r["predicted_unanswerable"], "cost": r["cost"]})
     setups, cases = [], []
     for name, setup in Setup.load_all().items():
         agent = ReflectionAgent(setup, writers[setup.writer], checks)
-        contexts = build_contexts(agent, split, sample["questions"], sample["seed"], runs_dir)
-        paths = stage_paths(agent, runs_dir)
-        critiques, revisions = read_stage(paths, "critic"), read_stage(paths, "revise")
-        if not has_run(agent, contexts, critiques, revisions):
+        contexts = reflection.contexts(agent)
+        critiques, revisions = reflection.results(agent)
+        if not reflection.has_run(agent, contexts, critiques, revisions):
             raise ValueError(f"{name} has not run with the current code and config; run it before building the page")
         final = ReflectionAgent.final_answers(contexts, critiques, revisions)
-        r = report(split, contexts, critiques, revisions)
-        a = RevisionAnalysis(analysis_config["bootstrap_resamples"], analysis_config["seed"]).analyze(
-            ReflectionAgent.revisions(contexts, final))
+        r = reflection.report(contexts, critiques, revisions)
+        a = reflection.analyze(contexts, critiques, revisions)
         setups.append({"name": name, "writer": setup.writer, "critic": setup.critic.model if setup.critic else None,
                        "code_feedback": setup.critic is None or setup.critic.code_feedback,
                        "before": r["draft_answer_f1"], "after": r["answer_f1"], "delta": a["delta"], "ci": list(a["ci"]),
@@ -68,6 +67,6 @@ def collect(split: QasperSplit, runs_dir: Path = RUNS_DIR) -> dict:
                        "contributions": contributions(a, len(contexts))})
         cases.append((name, contexts, final))
     after = {row["name"]: row["after"] for row in setups}
-    first, second = analysis_config["replicate_pair"]
-    return {"questions": sample["questions"], "baselines": baselines, "setups": setups, "examples": pick_examples(cases),
-            "spent": total_spent(runs_dir), "noise": {"pair": [first, second], "gap": abs(after[first] - after[second])}}
+    first, second = load_config("reflection")["analysis"]["replicate_pair"]
+    return {"questions": baseline.n, "baselines": baselines, "setups": setups, "examples": pick_examples(cases),
+            "spent": store.total_spent(), "noise": {"pair": [first, second], "gap": abs(after[first] - after[second])}}

@@ -57,6 +57,12 @@ class ModelAnswer:
     input_tokens: int
     output_tokens: int
 
+    def to_row(self, cost: float) -> dict:
+        """The run file row, in the shape `load_predictions` reads."""
+        return {"question_id": self.question_id, "predicted_answer": self.answer,
+                "predicted_evidence": list(self.evidence_ids), "status": self.status, "model": self.model,
+                "input_tokens": self.input_tokens, "output_tokens": self.output_tokens, "cost": cost}
+
 
 def passages_block(passages: list[Paragraph]) -> str:
     """Paragraphs as the writer and the critic see them: each labeled with its ID."""

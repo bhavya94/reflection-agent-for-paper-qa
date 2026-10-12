@@ -22,7 +22,7 @@ questions answerable from text only. The test split is never downloaded.
 ## M1 baselines
 
 200 text-only dev questions (seeded sample), Batch API, run 2026-10-11. Reproduce with
-`uv run python -m reflective_qa.baselines report`.
+`uv run rqa baselines report`.
 
 | Run | Answer-F1 | Evidence-F1 | Says "Unanswerable" | Cost |
 |---|---|---|---|---|
@@ -36,7 +36,7 @@ published numbers. 14.5% of these questions have an annotator who marked them un
 ## M3 reflection results
 
 One round of reflection on the M1 drafts, same 200 questions, run 2026-10-11 for $2.29. Reproduce with
-`uv run python -m reflective_qa.reflection report`.
+`uv run rqa reflect report`.
 
 | Setup | Answer-F1 | Change, 95% CI | Says "Unanswerable" | Revised: better / worse | Cost |
 |---|---|---|---|---|---|
@@ -63,10 +63,10 @@ uv run rqa download                                                    # QASPER 
 uv run rqa stats                                                       # dev split summary
 uv run rqa recall                                                      # BM25 evidence recall@k
 uv run rqa score predictions.jsonl                                     # answer-F1 (official) + paragraph-ID evidence-F1
-uv run --env-file .env python -m reflective_qa.baselines run sonnet-k20 --max-dollars 1.50   # needs ANTHROPIC_API_KEY in .env
-uv run python -m reflective_qa.baselines report                                  # score every run on its sample
+uv run --env-file .env rqa baselines run sonnet-k20 --max-dollars 1.50  # needs ANTHROPIC_API_KEY in .env
+uv run rqa baselines report                                            # score every run on its sample
 uv run rqa checks                                                      # code checks on the M1 drafts
-uv run --env-file .env python -m reflective_qa.reflection run sonnet-self-critique --max-dollars 1.50   # one setup
-uv run python -m reflective_qa.reflection report                                # every setup vs. its drafts
+uv run --env-file .env rqa reflect run sonnet-self-critique --max-dollars 1.50   # one setup
+uv run rqa reflect report                                              # every setup vs. its drafts
 uv run pytest
 ```

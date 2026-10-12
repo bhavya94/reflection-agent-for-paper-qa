@@ -8,9 +8,12 @@ from reflective_qa.agent.checks import CodeChecks
 from reflective_qa.agent.critic import SYSTEM as CRITIC_SYSTEM, CriticConfig
 from reflective_qa.agent.reflection import ReflectionAgent, Setup
 from reflective_qa.agent.writer import Writer
-from reflective_qa.baselines import Costs, answer_record, read_answers, run_paths, submit_and_collect
 from reflective_qa.data.qasper import QasperSplit
-from reflective_qa.reflection import build_contexts, critique_record, estimate_setup, report, run_setup
+from reflective_qa.eval.analysis import RevisionAnalysis
+from reflective_qa.experiments.reflection import ReflectionExperiment
+from reflective_qa.runs.batch import BatchRunner, OverBudget
+from reflective_qa.runs.costs import Costs
+from reflective_qa.runs.store import RunStore
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mini_qasper.json"
 COSTS = Costs(prices={"claude-sonnet-5-5": {"input": 2.0, "output": 10.0}, "claude-haiku-5-5": {"input": 0.1, "output": 0.5}},
@@ -47,30 +50,23 @@ class FakeBatches:
             yield SimpleNamespace(custom_id=qid, result=SimpleNamespace(type="succeeded", message=message))
 
 
-def _setup_drafts(tmp_path):
-    split = QasperSplit.load(FIXTURE)
+def _setup_drafts(tmp_path, client=None):
+    """Drafts for every fixture question, and the experiment that reflects on them with `client`."""
+    split, store = QasperSplit.load(FIXTURE), RunStore(tmp_path)
     agent = ReflectionAgent(SETUP, Writer.load_all()["haiku-k5"], CodeChecks(35))
-    run_paths(agent.writer, tmp_path)[0].write_text("".join(
+    store.writer_files(agent.writer)[0].write_text("".join(
         json.dumps({"question_id": q.id, "predicted_answer": "a tiny model with many words", "predicted_evidence": ["s0p0"],
                     "output_tokens": 50}) + "\n" for q in split.questions()))
-    return split, agent, build_contexts(agent, split, None, 0, runs_dir=tmp_path)
-
-
-def _paths(tmp_path):
-    return {stage: (tmp_path / f"{stage}.jsonl", tmp_path / f"{stage}.batch") for stage in ("critic", "revise")}
+    experiment = ReflectionExperiment(split, store, COSTS, None, 0, RevisionAnalysis(100, 0),
+                                      runner=BatchRunner(client or FakeBatches({}), poll_seconds=0))
+    return experiment, agent, experiment.contexts(agent)
 
 
 def _run(tmp_path, verdicts):
-    papers, agent, contexts = _setup_drafts(tmp_path)
-    client = FakeBatches(verdicts)
-    critic_path = submit_and_collect(client, agent.critic_requests(contexts), tmp_path / "c.jsonl", tmp_path / "c.batch",
-                                     critique_record(agent, COSTS), poll_seconds=0)
-    critiques = {r["question_id"]: r for r in read_answers(critic_path)}
-    revise = agent.revise_requests(contexts, critiques)
-    revise_path = submit_and_collect(client, revise, tmp_path / "r.jsonl", tmp_path / "r.batch",
-                                     lambda qid, m: answer_record(Writer.parse(qid, m), agent.writer, COSTS), poll_seconds=0)
-    revisions = {r["question_id"]: r for r in read_answers(revise_path)}
-    return papers, contexts, critiques, revisions, revise
+    experiment, agent, contexts = _setup_drafts(tmp_path, FakeBatches(verdicts))
+    experiment.run(agent, contexts)
+    critiques, revisions = experiment.results(agent)
+    return experiment, contexts, critiques, revisions, agent.revise_requests(contexts, critiques)
 
 
 def test_only_drafts_the_critic_flags_are_revised(tmp_path):
@@ -97,53 +93,52 @@ def test_a_failed_revision_keeps_the_draft(tmp_path):
 def test_report_counts_changed_answers_and_which_way_answer_f1_moved(tmp_path):
     # q-extractive: the long draft scores 0 against "Foo, Bar"; the revision "Foo" scores higher -> better.
     # q-boolean: draft and revision both score 0 against "No" -> changed, but neither better nor worse.
-    papers, contexts, critiques, revisions, _ = _run(tmp_path, {"q-extractive": "revise", "q-abstractive": "pass", "q-boolean": "revise"})
-    r = report(papers, contexts, critiques, revisions)
+    experiment, contexts, critiques, revisions, _ = _run(tmp_path, {"q-extractive": "revise", "q-abstractive": "pass", "q-boolean": "revise"})
+    r = experiment.report(contexts, critiques, revisions)
     assert (r["critiques"], r["critic_revise"], r["revisions"], r["changed"], r["better"], r["worse"]) == (3, 2, 2, 2, 1, 0)
     assert r["answer_f1"] > r["draft_answer_f1"]
 
 
 def test_critic_over_budget_is_refused_before_any_batch(tmp_path):
-    papers, agent, contexts = _setup_drafts(tmp_path)
     client = FakeBatches({}, input_tokens=10_000_000)
-    with pytest.raises(SystemExit, match="critic estimate"):
-        run_setup(client, agent, contexts, COSTS, _paths(tmp_path), max_dollars=1.0, poll_seconds=0)
+    experiment, agent, contexts = _setup_drafts(tmp_path, client)
+    with pytest.raises(OverBudget, match="critic estimate"):
+        experiment.run(agent, contexts, max_dollars=1.0)
     assert client.batches == {}
 
 
 def test_revise_over_budget_is_refused_after_the_critic_stage(tmp_path):
-    papers, agent, contexts = _setup_drafts(tmp_path)
-    client = FakeBatches({q: "revise" for q in contexts})
+    client = FakeBatches({q: "revise" for q in ("q-extractive", "q-abstractive", "q-boolean")})
+    experiment, agent, contexts = _setup_drafts(tmp_path, client)
     # Sonnet reviews count 1,000 tokens (about $0.01 for the stage); Haiku revisions count 10M (about $1.50).
     client.messages.count_tokens = lambda *, model, **_: SimpleNamespace(
         input_tokens=10_000_000 if model == "claude-haiku-5-5" else 1000)
-    with pytest.raises(SystemExit, match="revise estimate"):
-        run_setup(client, agent, contexts, COSTS, _paths(tmp_path), max_dollars=0.05, poll_seconds=0)
-    assert len(client.batches) == 1 and len(read_answers(_paths(tmp_path)["critic"][0])) == 3
+    with pytest.raises(OverBudget, match="revise estimate"):
+        experiment.run(agent, contexts, max_dollars=0.05)
+    assert len(client.batches) == 1 and len(experiment.results(agent)[0]) == 3
 
 
 def test_a_paid_batch_waiting_to_be_collected_is_never_blocked(tmp_path):
-    papers, agent, contexts = _setup_drafts(tmp_path)
-    client = FakeBatches({q: "pass" for q in contexts}, input_tokens=10_000_000)
-    client.batches["b-paid"] = [(q, True) for q in contexts]
-    paths = _paths(tmp_path)
-    paths["critic"][1].write_text("b-paid")
-    run_setup(client, agent, contexts, COSTS, paths, max_dollars=0.01, poll_seconds=0)
-    assert len(read_answers(paths["critic"][0])) == 3 and list(client.batches) == ["b-paid"]
+    questions = ("q-extractive", "q-abstractive", "q-boolean")
+    client = FakeBatches({q: "pass" for q in questions}, input_tokens=10_000_000)
+    client.batches["b-paid"] = [(q, True) for q in questions]
+    experiment, agent, contexts = _setup_drafts(tmp_path, client)
+    RunStore(tmp_path).stage_files(agent)["critic"][1].write_text("b-paid")
+    experiment.run(agent, contexts, max_dollars=0.01)
+    assert len(experiment.results(agent)[0]) == 3 and list(client.batches) == ["b-paid"]
 
 
 def test_the_estimate_stops_assuming_revisions_once_the_critic_passes_drafts(tmp_path):
-    papers, agent, contexts = _setup_drafts(tmp_path)
-    client = FakeBatches({})
-    before = estimate_setup(client, agent, contexts, COSTS, {}, {})
+    experiment, agent, contexts = _setup_drafts(tmp_path)
+    before = experiment.estimate(agent, contexts, {}, {})
     passed = {q: {"question_id": q, "verdict": "pass", "problems": [], "output_tokens": 80} for q in contexts}
-    after = estimate_setup(client, agent, contexts, COSTS, passed, {})
+    after = experiment.estimate(agent, contexts, passed, {})
     assert (before["critic_requests"], before["revise_requests"]) == (3, 3)
     assert (after["critic_requests"], after["revise_requests"], after["revise_dollars"]) == (0, 0, 0.0)
 
 
 def test_revisions_keep_the_writer_prompt_and_schema_and_the_critic_sees_every_passage(tmp_path):
-    papers, agent, contexts = _setup_drafts(tmp_path)
+    _, agent, contexts = _setup_drafts(tmp_path)
     c = contexts["q-extractive"]
     original = agent.writer.request(c.paper, c.question, c.passages)
     revised = agent.revise_request(c, [])

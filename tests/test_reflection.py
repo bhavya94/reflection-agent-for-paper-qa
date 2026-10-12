@@ -8,9 +8,9 @@ from reflective_qa.agent.checks import CodeChecks, Finding
 from reflective_qa.agent.critic import CriticConfig
 from reflective_qa.agent.reflection import ReflectionAgent, Setup
 from reflective_qa.agent.writer import REVISE_INSTRUCTION, RunConfig, Writer
-from reflective_qa.baselines import run_paths
 from reflective_qa.data.qasper import QasperSplit
-from reflective_qa.reflection import build_contexts
+from reflective_qa.experiments.reflection import ReflectionExperiment
+from reflective_qa.runs.store import RunStore
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mini_qasper.json"
 WRITER = Writer(RunConfig(name="w", model="claude-haiku-5-5", k=2, effort="medium", max_tokens=100))
@@ -28,10 +28,10 @@ def _fingerprint(setup, writer=WRITER, max_words=30):
 def _contexts(tmp_path, setup, answer="Foo"):
     """Drafts for every fixture question, written where the setup's writer run keeps its answers."""
     split = QasperSplit.load(FIXTURE)
-    drafts = run_paths(Writer.load_all()[setup.writer], tmp_path)[0]
+    drafts = RunStore(tmp_path).writer_files(Writer.load_all()[setup.writer])[0]
     drafts.write_text("".join(json.dumps({"question_id": q.id, "predicted_answer": answer, "predicted_evidence": ["s1p0"]}) + "\n"
                               for q in split.questions()))
-    return build_contexts(_agent(setup), split, n=None, seed=0, runs_dir=tmp_path)
+    return ReflectionExperiment.from_config(split, RunStore(tmp_path)).contexts(_agent(setup))
 
 
 def test_the_five_planned_setups_cover_both_writers():
@@ -65,10 +65,10 @@ def test_the_word_limit_counts_only_where_findings_are_shown():
 
 def test_a_sampled_question_without_a_draft_is_an_error(tmp_path):
     split = QasperSplit.load(FIXTURE)
-    run_paths(Writer.load_all()["haiku-k5"], tmp_path)[0].write_text(
+    RunStore(tmp_path).writer_files(Writer.load_all()["haiku-k5"])[0].write_text(
         json.dumps({"question_id": "q-extractive", "predicted_answer": "Foo", "predicted_evidence": []}) + "\n")
     with pytest.raises(ValueError, match="no draft for 2 of 3"):
-        build_contexts(_agent(Setup("s", "haiku-k5", None)), split, n=None, seed=0, runs_dir=tmp_path)
+        ReflectionExperiment.from_config(split, RunStore(tmp_path)).contexts(_agent(Setup("s", "haiku-k5", None)))
 
 
 def test_contexts_carry_the_draft_and_the_check_findings(tmp_path):

@@ -3,12 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from reflective_qa.baselines import run_paths
 from reflective_qa.agent.checks import CodeChecks
 from reflective_qa.agent.reflection import ReflectionAgent, Setup
 from reflective_qa.agent.writer import Writer
 from reflective_qa.data.qasper import QasperSplit
-from reflective_qa.reflection import build_contexts, stage_paths
+from reflective_qa.experiments.reflection import ReflectionExperiment
+from reflective_qa.runs.store import RunStore
 from reflective_qa.site_data import collect, contributions, pick_examples
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mini_qasper.json"
@@ -21,7 +21,7 @@ def write_rows(path: Path, rows: list[dict]) -> None:
 
 def write_drafts(runs_dir: Path) -> None:
     for run in Writer.load_all().values():
-        write_rows(run_paths(run, runs_dir)[0], [{"question_id": q, "predicted_answer": a, "predicted_evidence": [],
+        write_rows(RunStore(runs_dir).writer_files(run)[0], [{"question_id": q, "predicted_answer": a, "predicted_evidence": [],
                                                   "cost": 0.01, "output_tokens": 5} for q, a in DRAFTS.items()])
 
 
@@ -36,7 +36,7 @@ def test_contributions_add_up_to_the_total_change():
 def test_examples_are_the_clearest_case_of_each_kind_across_setups(tmp_path):
     write_drafts(tmp_path)
     agent = ReflectionAgent(Setup("s", "haiku-k5", None), Writer.load_all()["haiku-k5"], CodeChecks(35))
-    contexts = build_contexts(agent, QasperSplit.load(FIXTURE), None, 0, runs_dir=tmp_path)
+    contexts = ReflectionExperiment.from_config(QasperSplit.load(FIXTURE), RunStore(tmp_path)).contexts(agent)
     final = lambda answers: {q: {"predicted_answer": a} for q, a in answers.items()}
     a = final({"q-extractive": "Foo, Bar",                 # shortened: the larger gain
                "q-abstractive": "a model",                 # abstention fixed: the smaller gain
@@ -55,7 +55,7 @@ def test_collect_scores_every_setup_and_measures_noise_from_the_replicate_pair(t
     write_drafts(tmp_path)
     writers, checks = Writer.load_all(), CodeChecks.from_config()
     for name, setup in Setup.load_all().items():
-        paths = stage_paths(ReflectionAgent(setup, writers[setup.writer], checks), tmp_path)
+        paths = RunStore(tmp_path).stage_files(ReflectionAgent(setup, writers[setup.writer], checks))
         if setup.critic:
             write_rows(paths["critic"][0], [{"question_id": q, "verdict": "pass", "cost": 0.02} for q in DRAFTS])
         fixed = name == "haiku-sonnet-critic-checks"  # only one of the replicate pair fixes the abstention
