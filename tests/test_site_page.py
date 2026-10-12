@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from reflective_qa.site import TEMPLATE, render
+from reflective_qa.site.page import TEMPLATE, render
 
 
 @pytest.mark.parametrize("answer", ["</script><script>alert(1)</script>", "<!--<script>"])

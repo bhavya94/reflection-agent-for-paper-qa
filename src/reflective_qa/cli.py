@@ -7,6 +7,7 @@
     uv run rqa baselines report         one-shot answers of every writer run (estimate and run need an API key)
     uv run rqa checks                   how often each code check fires on the first answers
     uv run rqa reflect report           every reflection setup against its drafts (estimate and run need an API key)
+    uv run rqa site                     build the public results page into site/index.html
 
 Paid commands need ANTHROPIC_API_KEY (`uv run --env-file .env rqa ...`) and refuse to run without --max-dollars.
 """
@@ -25,10 +26,12 @@ from reflective_qa.data.stats import summarize
 from reflective_qa.eval.scorer import Scorer, load_predictions
 from reflective_qa.experiments.baseline import BaselineExperiment
 from reflective_qa.experiments.reflection import ReflectionExperiment
-from reflective_qa.paths import DEV_SPLIT, load_config
+from reflective_qa.paths import DEV_SPLIT, ROOT, load_config
 from reflective_qa.retrieval.recall import RecallEvaluator
 from reflective_qa.runs.batch import OverBudget
 from reflective_qa.runs.store import RunStore
+from reflective_qa.site.collector import ResultsCollector
+from reflective_qa.site.page import build
 
 
 def _download(args: argparse.Namespace) -> None:
@@ -135,6 +138,11 @@ def _reflect(args: argparse.Namespace) -> None:
                 print(f"{'':30}change {a['delta']:+.3f}, 95% CI [{a['ci'][0]:+.3f}, {a['ci'][1]:+.3f}]  {kinds}")
 
 
+def _site(args: argparse.Namespace) -> None:
+    out = build(ResultsCollector(QasperSplit.load(args.dev), RunStore()), args.out)
+    print(f"wrote {out} ({out.stat().st_size // 1024} KB)")
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="rqa", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -142,11 +150,13 @@ def main(argv: list[str] | None = None) -> None:
     handlers = {"stats": (_stats, "summarize a split"), "recall": (_recall, "BM25 evidence recall@k"),
                 "score": (_score, "score a predictions file"), "checks": (_checks, "code checks on the first answers"),
                 "baselines": (_baselines, "one-shot answers: estimate, run or report"),
-                "reflect": (_reflect, "one round of reflection: estimate, run or report")}
+                "reflect": (_reflect, "one round of reflection: estimate, run or report"),
+                "site": (_site, "build the public results page")}
     for name, (func, help) in handlers.items():
         command = commands.add_parser(name, help=help)
         command.add_argument("--dev", type=Path, default=DEV_SPLIT, help="QASPER split file; default: dev")
         command.set_defaults(func=func)
+    commands.choices["site"].add_argument("--out", type=Path, default=ROOT / "site" / "index.html")
     commands.choices["score"].add_argument("predictions", type=Path,
                                            help="JSON lines of question_id, predicted_answer, predicted_evidence")
     for name, configured, budget in [
