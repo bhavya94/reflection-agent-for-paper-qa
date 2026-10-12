@@ -65,7 +65,7 @@ uv run rqa recall                                                      # BM25 ev
 uv run rqa score predictions.jsonl                                     # answer-F1 (official) + paragraph-ID evidence-F1
 uv run --env-file .env python -m reflective_qa.baselines run sonnet-k20 --max-dollars 1.50   # needs ANTHROPIC_API_KEY in .env
 uv run python -m reflective_qa.baselines report                                  # score every run on its sample
-uv run python -m reflective_qa.checks data/raw/qasper-dev-v0.3.json    # code checks on the M1 drafts
+uv run rqa checks                                                      # code checks on the M1 drafts
 uv run --env-file .env python -m reflective_qa.reflection run sonnet-self-critique --max-dollars 1.50   # one setup
 uv run python -m reflective_qa.reflection report                                # every setup vs. its drafts
 uv run pytest

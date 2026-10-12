@@ -4,11 +4,16 @@
     uv run rqa stats                    dev split summary
     uv run rqa recall                   BM25 evidence recall@k vs. a random baseline
     uv run rqa score PREDICTIONS        answer-F1 (official) and paragraph-ID evidence-F1 of a JSON lines file
+    uv run rqa checks                   how often each code check fires on the first answers
 """
 
 import argparse
+import statistics
 from pathlib import Path
 
+from reflective_qa.agent.checks import CodeChecks
+from reflective_qa.agent.writer import Writer
+from reflective_qa.baselines import check_findings
 from reflective_qa.data.download import download
 from reflective_qa.data.qasper import QasperSplit
 from reflective_qa.data.stats import summarize
@@ -47,16 +52,28 @@ def _score(args: argparse.Namespace) -> None:
         print(f"  {answer_type:12} {f1:.3f}")
 
 
+def _checks(args: argparse.Namespace) -> None:
+    split, checks, sample = QasperSplit.load(args.dev), CodeChecks.from_config(), load_config("answering")["sample"]
+    mean = lambda xs: f"{statistics.mean(xs):.3f} (n={len(xs)})" if xs else "n/a"
+    for name, writer in Writer.load_all().items():
+        if not writer.k:
+            continue  # closed-book drafts cite nothing, so there is nothing to check against
+        r = check_findings(writer, split, checks, sample["questions"], sample["seed"])
+        print(f"{name}: {sum(r['counts'].values())} findings on {r['drafts']} drafts  {r['counts']}")
+        print(f"  content answers: answer-F1 flagged {mean(r['flagged_f1'])} vs not flagged {mean(r['clean_f1'])}")
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="rqa", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("download", help="download and verify QASPER").set_defaults(func=_download)
     split_commands = {name: commands.add_parser(name, help=help) for name, help in [
-        ("stats", "summarize a split"), ("recall", "BM25 evidence recall@k"), ("score", "score a predictions file")]}
+        ("stats", "summarize a split"), ("recall", "BM25 evidence recall@k"), ("score", "score a predictions file"),
+        ("checks", "code checks on the first answers")]}
     split_commands["score"].add_argument("predictions", type=Path, help="JSON lines of question_id, predicted_answer, "
                                          "predicted_evidence")
     for name, command in split_commands.items():
         command.add_argument("--dev", type=Path, default=DEV_SPLIT, help="QASPER split file; default: dev")
-        command.set_defaults(func={"stats": _stats, "recall": _recall, "score": _score}[name])
+        command.set_defaults(func={"stats": _stats, "recall": _recall, "score": _score, "checks": _checks}[name])
     args = parser.parse_args(argv)
     args.func(args)

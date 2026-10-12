@@ -9,20 +9,19 @@ Money safety:
 """
 
 import argparse
-import hashlib
 import json
 import statistics
 import time
-import tomllib
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from reflective_qa.answering import (ANSWER_SCHEMA, CONFIG, SYSTEM, Answer, RunConfig, build_request, load_runs,
-                                     parse_message)
+from reflective_qa.agent.checks import CodeChecks
+from reflective_qa.agent.writer import ModelAnswer, Writer
 from reflective_qa.data.qasper import QasperSplit
-from reflective_qa.paths import DEV_SPLIT, RUNS_DIR
+from reflective_qa.paths import DEV_SPLIT, RUNS_DIR, load_config
 from reflective_qa.retrieval.bm25 import Retriever
+from reflective_qa.eval.metrics import answer_f1, is_unanswerable, normalize
 from reflective_qa.eval.scorer import Scorer, load_predictions
 
 
@@ -37,24 +36,19 @@ class Costs:
         return (input_tokens * price["input"] + output_tokens * price["output"]) / 1e6 * self.batch_discount
 
 
-def load_costs(path: Path = CONFIG) -> Costs:
-    return Costs(**tomllib.loads(path.read_text())["costs"])
+def load_costs() -> Costs:
+    return Costs(**load_config("answering")["costs"])
 
 
-def fingerprint(run: RunConfig) -> str:
-    setup = {"run": {k: v for k, v in asdict(run).items() if k != "name"}, "system": SYSTEM, "schema": ANSWER_SCHEMA}
-    return hashlib.sha256(json.dumps(setup, sort_keys=True).encode()).hexdigest()[:10]
-
-
-def run_paths(run: RunConfig, out_dir: Path) -> tuple[Path, Path]:
-    stem = f"{run.name}-{fingerprint(run)}"
+def run_paths(writer: Writer, out_dir: Path) -> tuple[Path, Path]:
+    stem = f"{writer.name}-{writer.fingerprint}"
     return out_dir / f"{stem}.jsonl", out_dir / f"{stem}.batch"
 
 
-def build_requests(run: RunConfig, split: QasperSplit, n: int | None = None, seed: int = 0) -> dict[str, dict]:
+def build_requests(writer: Writer, split: QasperSplit, n: int | None = None, seed: int = 0) -> dict[str, dict]:
     """Request parameters keyed by question ID, for a seeded sample of n text-only questions (all if n is None)."""
     retriever = Retriever(split)
-    return {q.id: build_request(run, split.paper(q.paper_id), q, retriever.retrieve(q, run.k)) for q in split.sample(n, seed)}
+    return {q.id: writer.request(split.paper(q.paper_id), q, retriever.retrieve(q, writer.k)) for q in split.sample(n, seed)}
 
 
 def read_answers(path: Path) -> list[dict]:
@@ -89,19 +83,19 @@ def submit_and_collect(client: Any, requests: dict[str, dict], answers_path: Pat
     return answers_path
 
 
-def run_batch(client: Any, run: RunConfig, requests: dict[str, dict], costs: Costs, out_dir: Path = RUNS_DIR,
+def run_batch(client: Any, writer: Writer, requests: dict[str, dict], costs: Costs, out_dir: Path = RUNS_DIR,
               poll_seconds: float = 30) -> Path:
     """Answers go to the run's JSON lines file, in the shape `load_predictions` reads."""
-    answers_path, batch_path = run_paths(run, out_dir)
+    answers_path, batch_path = run_paths(writer, out_dir)
     return submit_and_collect(client, requests, answers_path, batch_path,
-                              lambda qid, message: answer_record(parse_message(qid, message), run, costs), poll_seconds)
+                              lambda qid, message: answer_record(Writer.parse(qid, message), writer, costs), poll_seconds)
 
 
-def answer_record(answer: Answer, run: RunConfig, costs: Costs) -> dict:
+def answer_record(answer: ModelAnswer, writer: Writer, costs: Costs) -> dict:
     return {"question_id": answer.question_id, "predicted_answer": answer.answer,
             "predicted_evidence": list(answer.evidence_ids), "status": answer.status, "model": answer.model,
             "input_tokens": answer.input_tokens, "output_tokens": answer.output_tokens,
-            "cost": costs.dollars(run.model, answer.input_tokens, answer.output_tokens)}
+            "cost": costs.dollars(writer.model, answer.input_tokens, answer.output_tokens)}
 
 
 def count_input_tokens(client: Any, requests: dict[str, dict], sample: int = 50) -> float:
@@ -112,29 +106,48 @@ def count_input_tokens(client: Any, requests: dict[str, dict], sample: int = 50)
                            .input_tokens for qid in sampled)
 
 
-def estimate(client: Any, run: RunConfig, requests: dict[str, dict], costs: Costs, sample: int = 50,
+def estimate(client: Any, writer: Writer, requests: dict[str, dict], costs: Costs, sample: int = 50,
              out_dir: Path = RUNS_DIR) -> dict:
     """Batch cost of answering `requests`. Input tokens are counted (free) on an evenly spaced sample; output
     tokens are this run's measured mean if it has answers, else the configured assumption."""
     ids = list(requests)
     if not ids:
-        return {"run": run.name, "questions": 0, "input_tokens": 0, "output_tokens": 0, "output_measured": False,
+        return {"run": writer.name, "questions": 0, "input_tokens": 0, "output_tokens": 0, "output_measured": False,
                 "dollars": 0.0}
-    answered = read_answers(run_paths(run, out_dir)[0])
+    answered = read_answers(run_paths(writer, out_dir)[0])
     output = statistics.mean(r["output_tokens"] for r in answered) if answered else costs.assumed_output_tokens
     input_mean = count_input_tokens(client, requests, sample)
-    return {"run": run.name, "questions": len(ids), "input_tokens": input_mean, "output_tokens": output,
+    return {"run": writer.name, "questions": len(ids), "input_tokens": input_mean, "output_tokens": output,
             "output_measured": bool(answered),
-            "dollars": costs.dollars(run.model, input_mean * len(ids), output * len(ids))}
+            "dollars": costs.dollars(writer.model, input_mean * len(ids), output * len(ids))}
 
 
-def report(run: RunConfig, requests: dict[str, dict], split: QasperSplit, out_dir: Path = RUNS_DIR) -> dict:
+def report(writer: Writer, requests: dict[str, dict], split: QasperSplit, out_dir: Path = RUNS_DIR) -> dict:
     """Scores a run on its own question sample, so questions outside the sample don't count as zeros."""
-    answers_path = run_paths(run, out_dir)[0]
+    answers_path = run_paths(writer, out_dir)[0]
     rows = read_answers(answers_path)
     result = Scorer(split).score(load_predictions(answers_path) if rows else {}, set(requests))
-    return result | {"run": run.name, "file": answers_path.name, "cost": sum(r["cost"] for r in rows),
+    return result | {"run": writer.name, "file": answers_path.name, "cost": sum(r["cost"] for r in rows),
                      "output_tokens": statistics.mean(r["output_tokens"] for r in rows) if rows else 0}
+
+
+def check_findings(writer: Writer, split: QasperSplit, checks: CodeChecks, n: int | None, seed: int,
+                   out_dir: Path = RUNS_DIR) -> dict:
+    """How often each code check fires on a writer's drafts. The F1 comparison covers content answers only (not
+    Unanswerable, Yes or No), since too_long can't flag those; it describes the drafts, it doesn't validate the checks."""
+    rows = {r["question_id"]: r for r in read_answers(run_paths(writer, out_dir)[0])}
+    retriever, questions = Retriever(split), split.sample(n, seed)
+    counts: dict[str, int] = {}
+    flagged_f1, clean_f1 = [], []
+    for q in questions:
+        row = rows[q.id]
+        ids = {p.id for p in retriever.retrieve(q, writer.k)}
+        found = checks.run(q.text, row["predicted_answer"], tuple(row["predicted_evidence"]), ids)
+        for check in {f.check for f in found}:
+            counts[check] = counts.get(check, 0) + 1
+        if not is_unanswerable(row["predicted_answer"]) and normalize(row["predicted_answer"]) not in ("yes", "no"):
+            (flagged_f1 if found else clean_f1).append(answer_f1(q, row["predicted_answer"])[0])
+    return {"drafts": len(questions), "counts": dict(sorted(counts.items())), "flagged_f1": flagged_f1, "clean_f1": clean_f1}
 
 
 def total_spent(out_dir: Path = RUNS_DIR) -> float:
@@ -151,9 +164,9 @@ def main() -> None:
     parser.add_argument("--questions", type=int, help="size of the seeded question sample; default: the config's")
     parser.add_argument("--max-dollars", type=float, help="required for run: refuse if the estimate is higher")
     args = parser.parse_args()
-    config = tomllib.loads(CONFIG.read_text())["sample"]
+    config = load_config("answering")["sample"]
     n = args.questions or config["questions"]
-    split, costs, runs = QasperSplit.load(args.dev), load_costs(), load_runs()
+    split, costs, runs = QasperSplit.load(args.dev), load_costs(), Writer.load_all()
     client = anthropic.Anthropic() if args.command != "report" else None
     for name in args.runs or runs:
         run = runs[name]

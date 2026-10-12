@@ -1,10 +1,10 @@
-from reflective_qa.checks import Finding, is_yes_no_question, load_max_words, run_checks
+from reflective_qa.agent.checks import CodeChecks, Finding, is_yes_no_question
 
 IDS = {"s0p0", "s1p0"}
 
 
 def _checks(question="What dataset is used?", answer="Foo", cited=("s0p0",), ids=IDS, max_words=5):
-    return [f.check for f in run_checks(question, answer, cited, ids, max_words)]
+    return [f.check for f in CodeChecks(max_words).run(question, answer, cited, ids)]
 
 
 def test_a_short_cited_answer_passes_every_check():
@@ -12,7 +12,7 @@ def test_a_short_cited_answer_passes_every_check():
 
 
 def test_citing_a_paragraph_that_was_not_given_is_flagged_once_per_id():
-    (finding,) = run_checks("What dataset is used?", "Foo", ("s9p9", "s9p9"), IDS, 5)
+    (finding,) = CodeChecks(5).run("What dataset is used?", "Foo", ("s9p9", "s9p9"), IDS)
     assert finding == Finding("bad_citation", "Cites s9p9, which was not among the given paragraphs.")
 
 
@@ -44,4 +44,4 @@ def test_long_answers_are_flagged_but_abstentions_are_not():
 
 
 def test_the_word_limit_comes_from_config():
-    assert load_max_words() == 35
+    assert CodeChecks.from_config().max_words == 35

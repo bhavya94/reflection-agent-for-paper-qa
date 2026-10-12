@@ -1,15 +1,15 @@
 """Results for the public page, collected from the real run files: M1 baselines and every reflection setup."""
 
-import tomllib
 from pathlib import Path
 
-from reflective_qa.answering import CONFIG as ANSWERING, load_runs
+from reflective_qa.agent.checks import CodeChecks
+from reflective_qa.agent.reflection import Context, ReflectionAgent, Setup
+from reflective_qa.agent.writer import Writer
 from reflective_qa.baselines import RUNS_DIR, build_requests, report as baseline_report, total_spent
-from reflective_qa.checks import CONFIG as REFLECTION, load_max_words
 from reflective_qa.data.qasper import QasperSplit
 from reflective_qa.eval.analysis import RevisionAnalysis
-from reflective_qa.reflection import (Context, build_contexts, final_answers, has_run, load_setups, read_stage, report,
-                                      revisions_of, stage_paths)
+from reflective_qa.paths import load_config
+from reflective_qa.reflection import build_contexts, has_run, read_stage, report, stage_paths
 
 KIND_LABELS = {"abstain_to_answer": "Unanswerable → answer", "answer_to_abstain": "Answer → Unanswerable",
                "reworded": "Reworded"}
@@ -25,7 +25,7 @@ def pick_examples(cases: list[tuple[str, dict[str, Context], dict[str, dict]]]) 
     rewording, the largest loss."""
     best: dict[str, tuple[float, dict]] = {}
     for setup, contexts, final in cases:
-        for r in revisions_of(contexts, final):
+        for r in ReflectionAgent.revisions(contexts, final):
             if not r.changed:
                 continue
             kind = r.kind
@@ -39,26 +39,26 @@ def pick_examples(cases: list[tuple[str, dict[str, Context], dict[str, dict]]]) 
 
 
 def collect(split: QasperSplit, runs_dir: Path = RUNS_DIR) -> dict:
-    sample = tomllib.loads(ANSWERING.read_text())["sample"]
-    analysis_config = tomllib.loads(REFLECTION.read_text())["analysis"]
-    max_words, runs = load_max_words(), load_runs()
+    sample, analysis_config = load_config("answering")["sample"], load_config("reflection")["analysis"]
+    checks, writers = CodeChecks.from_config(), Writer.load_all()
     baselines = []
-    for name, run in runs.items():
-        r = baseline_report(run, build_requests(run, split, sample["questions"], sample["seed"]), split, runs_dir)
-        baselines.append({"name": name, "model": run.model, "k": run.k, "answer_f1": r["answer_f1"],
-                          "evidence_f1": r["evidence_f1"] if run.k else None,
+    for name, writer in writers.items():
+        r = baseline_report(writer, build_requests(writer, split, sample["questions"], sample["seed"]), split, runs_dir)
+        baselines.append({"name": name, "model": writer.model, "k": writer.k, "answer_f1": r["answer_f1"],
+                          "evidence_f1": r["evidence_f1"] if writer.k else None,
                           "unanswerable": r["predicted_unanswerable"], "cost": r["cost"]})
     setups, cases = [], []
-    for name, setup in load_setups().items():
-        writer = runs[setup.writer]
-        contexts = build_contexts(setup, split, sample["questions"], sample["seed"], max_words, runs_dir)
-        paths = stage_paths(setup, writer, max_words, runs_dir)
+    for name, setup in Setup.load_all().items():
+        agent = ReflectionAgent(setup, writers[setup.writer], checks)
+        contexts = build_contexts(agent, split, sample["questions"], sample["seed"], runs_dir)
+        paths = stage_paths(agent, runs_dir)
         critiques, revisions = read_stage(paths, "critic"), read_stage(paths, "revise")
-        if not has_run(setup, writer, contexts, critiques, revisions):
+        if not has_run(agent, contexts, critiques, revisions):
             raise ValueError(f"{name} has not run with the current code and config; run it before building the page")
-        final = final_answers(contexts, critiques, revisions)
+        final = ReflectionAgent.final_answers(contexts, critiques, revisions)
         r = report(split, contexts, critiques, revisions)
-        a = RevisionAnalysis(analysis_config["bootstrap_resamples"], analysis_config["seed"]).analyze(revisions_of(contexts, final))
+        a = RevisionAnalysis(analysis_config["bootstrap_resamples"], analysis_config["seed"]).analyze(
+            ReflectionAgent.revisions(contexts, final))
         setups.append({"name": name, "writer": setup.writer, "critic": setup.critic.model if setup.critic else None,
                        "code_feedback": setup.critic is None or setup.critic.code_feedback,
                        "before": r["draft_answer_f1"], "after": r["answer_f1"], "delta": a["delta"], "ci": list(a["ci"]),
