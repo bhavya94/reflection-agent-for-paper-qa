@@ -1,11 +1,11 @@
-# reflective-qa
+# reflection-agent-for-paper-qa
 
 Does a review step make an AI agent answer questions about research papers better? This repo builds the agent, runs
 the experiment, and reports the answer: **not on average**. A reviewer fixes answers where the agent said
 "Unanswerable" although the paper had the answer. But it also rewrites good answers into worse ones, and the two
 effects cancel.
 
-**Results page:** https://bhavya94.github.io/reflective-qa/
+**Results page:** https://bhavya94.github.io/reflection-agent-for-paper-qa/
 
 **Words used here and in the code:** the code calls a *first answer* a *draft*, and the *reviewer* the *critic*.
 One round of review and revision is *reflection* (`rqa reflect`). A *setup* is one version of the review step;
