@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>BM25 Step by Step</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --ring: rgba(11,11,11,0.10);
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300;
+    --ref: #898781;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+      --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+      --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--ink);
+         font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 920px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 26px; line-height: 1.25; margin: 0 0 8px; }
+  h2 { font-size: 19px; margin: 40px 0 8px; }
+  h3 { font-size: 15px; margin: 20px 0 6px; }
+  p, li { color: var(--ink-2); max-width: 70ch; }
+  a { color: var(--s1); }
+  .lede { font-size: 16px; color: var(--ink); }
+  .card { background: var(--surface); border: 1px solid var(--ring); border-radius: 12px; padding: 16px; margin: 12px 0; }
+  .tabs, .seg { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 4px; }
+  button { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--ring);
+           border-radius: 999px; padding: 6px 14px; cursor: pointer; }
+  button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+  button:focus-visible, .row:focus-visible { outline: 2px solid var(--s1); outline-offset: 2px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--ring); border-radius: 999px;
+          padding: 2px 10px; font-size: 14px; background: var(--surface); }
+  .chip .key { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  .chip.dropped { color: var(--muted); text-decoration: line-through; }
+  .chip small { color: var(--muted); }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--grid); }
+  th { color: var(--ink-2); font-weight: 600; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .slider { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 8px 0; }
+  .slider input { width: 220px; }
+  .rows { margin-top: 8px; }
+  .row { display: grid; grid-template-columns: 44px minmax(0, 1fr) 56px; gap: 10px; align-items: center; padding: 6px 4px;
+         border-bottom: 1px solid var(--grid); cursor: pointer; border-radius: 6px; }
+  .row:hover { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+  .row.out .bar { opacity: 0.35; }
+  .rank { color: var(--ink-2); font-variant-numeric: tabular-nums; font-size: 13px; }
+  .label { font-size: 13px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gold { font-size: 12px; font-weight: 600; color: var(--ink); border: 1px solid var(--ink); border-radius: 999px;
+          padding: 0 7px; margin-right: 6px; }
+  .bar { display: flex; gap: 2px; height: 14px; margin-top: 3px; }
+  .bar span { height: 100%; }
+  .bar span:last-child { border-radius: 0 4px 4px 0; }
+  .score { text-align: right; font-variant-numeric: tabular-nums; font-size: 13px; }
+  .cut { text-align: center; font-size: 12px; color: var(--ink-2); border-bottom: 2px solid var(--ink); padding: 4px 0;
+         margin: 2px 0; }
+  .gap { text-align: center; font-size: 12px; color: var(--muted); padding: 4px 0; }
+  .detail { padding: 10px 12px 14px 54px; border-bottom: 1px solid var(--grid); }
+  .detail p { color: var(--ink); font-size: 14px; }
+  mark { color: inherit; border-radius: 3px; padding: 0 1px; }
+  .takeaway { border-left: 3px solid var(--ink); padding: 4px 0 4px 12px; margin: 12px 0 4px; color: var(--ink); }
+  #tip { position: fixed; pointer-events: none; background: var(--surface); color: var(--ink); border: 1px solid var(--ring);
+         border-radius: 8px; padding: 6px 10px; font-size: 13px; box-shadow: 0 4px 16px rgba(0,0,0,.12); display: none; z-index: 10; }
+  #tip b { font-variant-numeric: tabular-nums; }
+  .tiprow { display: flex; align-items: center; gap: 8px; }
+  .tiprow i { width: 14px; height: 2px; display: inline-block; }
+  svg text { fill: var(--muted); font-size: 12px; }
+  .formula { font-family: ui-monospace, Menlo, monospace; font-size: 14px; color: var(--ink); overflow-x: auto; white-space: nowrap; }
+  footer { margin-top: 48px; font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>How PR #6 finds the evidence: BM25, step by step</h1>
+  <p class="lede">The agent answers a question about a paper. It does not read the whole paper. It reads only the
+    paragraphs that a search step finds. PR #6 builds that search step and measures how often it finds the right paragraphs.</p>
+  <p><a href="https://github.com/bhavya94/reflection-agent-for-paper-qa/pull/6">Pull request #6</a> ·
+    <a href="2026-10-10-m1-retrieval.md">Written explainer</a></p>
+
+  <h2>Why the project needs this step</h2>
+  <ol>
+    <li>Cost: the model reads about 20 paragraphs, not the full paper. Every later model call is cheaper.</li>
+    <li>A ceiling: if the search misses the evidence, the model cannot answer correctly. It can only guess.</li>
+    <li>Diagnosis: we measure the search on its own. Then a wrong answer is either a search miss or a model mistake, never a mix.</li>
+  </ol>
+
+  <h2>BM25 on three real questions</h2>
+  <p>BM25 is a keyword search score. It gives each paragraph points for each question word it contains.
+    Pick a question. Then follow the three steps.</p>
+  <div class="tabs" id="tabs" role="group" aria-label="Example question"></div>
+  <div class="card">
+    <h3 id="qtext"></h3>
+    <p id="qpaper" style="margin-top:0"></p>
+
+    <h3>Step 1. Clean the question</h3>
+    <p id="stem-note"></p>
+    <div class="chips" id="words"></div>
+
+    <h3>Step 2. Weigh each word</h3>
+    <p>A word that is in few paragraphs of this paper is a strong signal. A word that is in most paragraphs is weak.
+      This weight is the IDF (inverse document frequency).</p>
+    <table id="idf"></table>
+
+    <h3>Step 3. Score and rank the paragraphs</h3>
+    <p>Each paragraph gets the sum of its word scores. A word scores more when it appears more often, but each extra
+      time adds less. Long paragraphs get a small penalty, so they do not win only because they are long.
+      Click a row to see the paragraph and the arithmetic.</p>
+    <div class="slider">
+      <label for="k">Paragraphs passed to the model (k): <b id="kval"></b></label>
+      <input type="range" id="k" min="1" max="20" value="5">
+      <span style="color:var(--muted);font-size:13px">M1 part 2 (answering) uses k = 20.</span>
+    </div>
+    <div class="chips" id="legend" aria-label="Word colors"></div>
+    <div class="rows" id="rows"></div>
+    <p class="takeaway" id="takeaway"></p>
+  </div>
+
+  <h2>Across all 759 dev questions</h2>
+  <p><span id="metric-def"></span> The gray line is k paragraphs picked at random.</p>
+  <div class="seg" id="metric" role="group" aria-label="Metric"></div>
+  <div class="card"><div class="chips" id="chart-legend"></div><svg id="chart" viewBox="0 0 640 300" width="100%" role="img" aria-labelledby="chart-title"></svg>
+    <details><summary>Table view</summary><table id="table"></table></details></div>
+  <p><span id="chart-caption"></span> It uses about 11,700 characters of the paper (about 2,900 tokens).
+    Example 3 shows what it misses: evidence that uses different words.</p>
+
+  <h2>The formula</h2>
+  <div class="card">
+    <div class="formula">score(paragraph) = Σ<sub>word</sub> IDF(word) × tf / (tf + k1 × (1 − b + b × length / average length))</div>
+    <p>tf is how many times the word is in the paragraph. k1 = 1.5 controls how fast extra repeats stop adding points.
+      b = 0.75 controls the length penalty. IDF = ln(1 + (N − n + 0.5) / (n + 0.5)), with N paragraphs in the paper and n
+      paragraphs that contain the word. These are the defaults of the bm25s library (Lucene variant). The numbers on this
+      page come from that formula. Their sums match the library scores to 0.0000001.</p>
+  </div>
+
+  <footer>Data: QASPER v0.3 dev split (Dasigi et al., 2021; CC BY 4.0). Paper text from S2ORC, as distributed with QASPER.</footer>
+</main>
+<div id="tip" role="status"></div>
+<script>
+const DATA = {"k1": 1.5, "b": 0.75, "examples": [{"question": "What modalities are supported by Macaw?", "words": [{"word": "What", "stem": "what", "kept": true}, {"word": "modalities", "stem": "modal", "kept": true}, {"word": "are", "stem": "are", "kept": false}, {"word": "supported", "stem": "support", "kept": true}, {"word": "by", "stem": "by", "kept": false}, {"word": "Macaw", "stem": "macaw", "kept": true}], "paper": "Macaw: An Extensible Conversational Information Seeking Platform", "terms": ["what", "modal", "support", "macaw"], "idf": {"what": 4.19, "modal": 1.792, "support": 1.054, "macaw": 0.428}, "df": {"what": 0, "modal": 5, "support": 11, "macaw": 21}, "n": 32, "avgdl": 39.7, "paragraphs": [{"id": "s0p3", "passage": "Introduction. The modular design of Macaw makes it relatively easy to configure a different user interface or add a new one. The current implementation of Macaw supports a command line interface as well as mobile, desktop, and web apps. In more detail, Macaw's interface can be a Telegram bot, which supports a wide range of devices and operating systems (see FIGREF4). This allows Macaw to support multi-modal interactions, such as text, speech, image, click, etc. A number of APIs for automatic speech recognition and generation have been employed to support speech interactions. Note that the Macaw's architecture and implementation allows mixed-initiative interactions.", "spans": [[36, 41, "macaw"], [155, 160, "macaw"], [161, 169, "support"], [253, 258, "macaw"], [300, 308, "support"], [382, 387, "macaw"], [391, 398, "support"], [405, 410, "modal"], [553, 560, "support"], [596, 601, "macaw"]], "length": 73, "tf": {"modal": 1, "support": 4, "macaw": 5}, "contrib": {"modal": 0.52, "support": 0.654, "macaw": 0.288}, "score": 1.462, "rank": 1, "gold": true}, {"id": "s1p1", "passage": "Macaw Architecture. Macaw also supports Wizard of Oz studies or intermediary-based information seeking studies. The architecture of Macaw for such setup is presented in FIGREF16. As shown in the figure, the seeker interacts with a real conversational interface that supports multi-modal and mixed-initiative interactions in multiple devices. The intermediary (or the wizard) receives the seeker's message and performs different information seeking actions with Macaw. All seeker-intermediary and intermediary-system interactions will be logged for further analysis. This setup can simulate an ideal CIS system and thus is useful for collecting high-quality data from real users for CIS research.", "spans": [[0, 5, "macaw"], [20, 25, "macaw"], [31, 39, "support"], [132, 137, "macaw"], [266, 274, "support"], [281, 286, "modal"], [461, 466, "macaw"]], "length": 70, "tf": {"modal": 1, "support": 2, "macaw": 4}, "contrib": {"modal": 0.533, "support": 0.484, "macaw": 0.27}, "score": 1.287, "rank": 2, "gold": false}, {"id": "s6p0", "passage": "Conclusions. This paper described Macaw, an open-source platform for conversational information seeking research. Macaw supports multi-turn, multi-modal, and mixed-initiative interactions. It was designed based on a modular architecture that allows further improvements and extensions. Researchers can benefit from Macaw for developing algorithms and techniques for conversational information seeking research, for user studies with different interfaces, for data collection from real users, and for preparing a demonstration of a CIS model.", "spans": [[34, 39, "macaw"], [114, 119, "macaw"], [120, 128, "support"], [147, 152, "modal"], [315, 320, "macaw"]], "length": 53, "tf": {"modal": 1, "support": 1, "macaw": 3}, "contrib": {"modal": 0.623, "support": 0.366, "macaw": 0.264}, "score": 1.253, "rank": 3, "gold": false}, {"id": "s4p0", "passage": "Limitations and Future Work. The current implementation of Macaw lacks the following actions. We intend to incrementally improve Macaw by supporting more actions and even more advanced techniques for the developed actions.", "spans": [[59, 64, "macaw"], [129, 134, "macaw"], [138, 148, "support"]], "length": 23, "tf": {"support": 1, "macaw": 2}, "contrib": {"support": 0.52, "macaw": 0.283}, "score": 0.803, "rank": 4, "gold": false}, {"id": "s1p0", "passage": "Macaw Architecture. Macaw has a modular design, with the goal of making it easy to configure and add new modules such as a different user interface or different retrieval module. The overall setup also follows a Model-View-Controller (MVC) like architecture. The design decisions have been made to smooth the Macaw's adoptions and extensions. Macaw is implemented in Python, thus machine learning models implemented using PyTorch, Scikit-learn, or TensorFlow can be easily integrated into Macaw. The high-level overview of Macaw is depicted in FIGREF8. The user interacts with the interface and the interface produces a Message object from the current interaction of user. The interaction can be in multi-modal form, such as text, speech, image, and click. Macaw stores all interactions in an \u201cInteraction Database\u201d. For every interaction, Macaw looks for most recent user-system interactions (including the system's responses) to create a list of Messages, called the conversation list. It is then dispatched to multiple information seeking (and related) actions. The actions run in parallel, and each should respond within a pre-defined time interval. The output selection component selects from (or potentially combines) the outputs generated by different actions and creates a Message object as the system's response. This message is logged into the interaction database and is sent to the interface to be presented to the user. Again, the response message can be multi-modal and include text, speech, link, list of options, etc.", "spans": [[0, 5, "macaw"], [20, 25, "macaw"], [309, 314, "macaw"], [343, 348, "macaw"], [489, 494, "macaw"], [523, 528, "macaw"], [705, 710, "modal"], [757, 762, "macaw"], [840, 845, "macaw"], [1474, 1479, "modal"]], "length": 159, "tf": {"modal": 2, "macaw": 8}, "contrib": {"modal": 0.521, "macaw": 0.266}, "score": 0.787, "rank": 5, "gold": false}, {"id": "s4p5", "passage": "Limitations and Future Work. Natural Language Interface: Macaw can potentially support access to structured data, such as knowledge graph. We would like to ease conversational natural language interface to structured and semi-structured data in our future releases.", "spans": [[57, 62, "macaw"], [79, 86, "support"]], "length": 30, "tf": {"support": 1, "macaw": 1}, "contrib": {"support": 0.474, "macaw": 0.193}, "score": 0.666, "rank": 6, "gold": false}, {"id": "s2p4", "passage": "Retrieval and Question Answering in Macaw. Retrieval Model: This is the core ranking component that retrieves documents or passages from a large collection. Macaw can retrieve documents from an arbitrary document collection using the Indri python interface BIBREF9, BIBREF10. We also provide the support for web search using the Bing Web Search API. Macaw also allows multi-stage document re-ranking.", "spans": [[36, 41, "macaw"], [157, 162, "macaw"], [296, 303, "support"], [350, 355, "macaw"]], "length": 48, "tf": {"support": 1, "macaw": 3}, "contrib": {"support": 0.385, "macaw": 0.271}, "score": 0.657, "rank": 7, "gold": false}, {"id": "s4p2", "passage": "Limitations and Future Work. Clarification and Preference Elicitation: Asking clarifying questions has been recently recognized as a necessary component in a conversational system BIBREF3, BIBREF7. The authors are not aware of a published solution for generating clarifying questions using public resources. Therefore, Macaw does not currently support clarification.", "spans": [[319, 324, "macaw"], [344, 351, "support"]], "length": 35, "tf": {"support": 1, "macaw": 1}, "contrib": {"support": 0.445, "macaw": 0.181}, "score": 0.626, "rank": 8, "gold": false}, {"id": "s2p2", "passage": "Retrieval and Question Answering in Macaw. Co-Reference Resolution: To support multi-turn interactions, it is sometimes necessary to use co-reference resolution techniques for effective retrieval. In Macaw, we identify all the co-references from the last request of user to the conversation history. The same co-reference resolution outputs can be used for different query generation components. This can be a generic or action-specific component.", "spans": [[36, 41, "macaw"], [71, 78, "support"], [200, 205, "macaw"]], "length": 48, "tf": {"support": 1, "macaw": 2}, "contrib": {"support": 0.385, "macaw": 0.229}, "score": 0.615, "rank": 9, "gold": false}, {"id": "s0p1", "passage": "Introduction. Research progress in CIS relies on the availability of resources to the community. There have been recent efforts on providing data for various CIS tasks, such as the TREC 2019 Conversational Assistance Track (CAsT), MISC BIBREF2, Qulac BIBREF3, CoQA BIBREF4, QuAC BIBREF5, SCS BIBREF6, and CCPE-M BIBREF7. In addition, BIBREF8 have implemented a demonstration for conversational movie recommendation based on Google's DialogFlow. Despite all of these resources, the community still feels the lack of a suitable platform for developing CIS systems. We believe that providing such platform will speed up the progress in conversational information seeking research. Therefore, we developed a general framework for supporting CIS research. The framework is called Macaw. This paper describes the high-level architecture of Macaw, the supported functionality, and our future vision. Researchers working on various CIS tasks should be able to take advantage of Macaw in their projects.", "spans": [[726, 736, "support"], [775, 780, "macaw"], [834, 839, "macaw"], [845, 854, "support"], [970, 975, "macaw"]], "length": 102, "tf": {"support": 2, "macaw": 3}, "contrib": {"support": 0.4, "macaw": 0.205}, "score": 0.605, "rank": 10, "gold": false}, {"id": "s3p4", "passage": "User Interfaces. Telegram: This interactive interface is designed for interaction with real users (see FIGREF4). Telegram is a popular instant messaging service whose client-side code is open-source. We have implemented a Telegram bot that can be used with different devices (personal computers, tablets, and mobile phones) and different operating systems (Android, iOS, Linux, Mac OS, and Windows). This interface allows multi-modal interactions (text, speech, click, image). It can be also used for speech-only interactions. For speech recognition and generation, Macaw relies on online APIs, e.g., the services provided by Google Cloud and Microsoft Azure. In addition, there exist multiple popular groups and channels in Telegram, which allows further integration of social networks with conversational systems. For example, see the Naseri and Zamani's study on news popularity in Telegram BIBREF12.", "spans": [[428, 433, "modal"], [566, 571, "macaw"]], "length": 97, "tf": {"modal": 1, "macaw": 1}, "contrib": {"modal": 0.434, "macaw": 0.104}, "score": 0.538, "rank": 11, "gold": false}, {"id": "s0p2", "passage": "Introduction. Macaw is designed based on a modular architecture to support different information seeking tasks, including conversational search, conversational question answering, conversational recommendation, and conversational natural language interface to structured and semi-structured data. Each interaction in Macaw (from both user and system) is a Message object, thus a conversation is a list of Messages. Macaw consists of multiple actions, each action is a module that can satisfy the information needs of users for some requests. For example, search and question answering can be two actions in Macaw. Even multiple search algorithms can be also seen as multiple actions. Each action can produce multiple outputs (e.g., multiple retrieved documents). For every user interaction, Macaw runs all actions in parallel. The actions' outputs produced within a predefined time interval (i.e., an interaction timeout constant) are then post-processed. Macaw can choose one or combine multiple of these outputs and prepare an output Message object as the user's response.", "spans": [[14, 19, "macaw"], [67, 74, "support"], [317, 322, "macaw"], [415, 420, "macaw"], [607, 612, "macaw"], [791, 796, "macaw"], [956, 961, "macaw"]], "length": 113, "tf": {"support": 1, "macaw": 6}, "contrib": {"support": 0.23, "macaw": 0.268}, "score": 0.499, "rank": 12, "gold": false}, {"id": "s4p4", "passage": "Limitations and Future Work. Recommendation: In our first release, we focus on conversational search and question answering tasks. We intend to provide support for conversational recommendation, e.g., BIBREF13, BIBREF14, BIBREF15, and joint search and recommendation, e.g., BIBREF16, BIBREF17, in the future.", "spans": [[152, 159, "support"]], "length": 29, "tf": {"support": 1}, "contrib": {"support": 0.48}, "score": 0.48, "rank": 13, "gold": false}, {"id": "s2p0", "passage": "Retrieval and Question Answering in Macaw. The overview of retrieval and question answering actions in Macaw is shown in FIGREF17. These actions consist of the following components:", "spans": [[36, 41, "macaw"], [103, 108, "macaw"]], "length": 16, "tf": {"macaw": 2}, "contrib": {"macaw": 0.303}, "score": 0.303, "rank": 14, "gold": false}, {"id": "s3p0", "passage": "User Interfaces. We have implemented the following interfaces for Macaw:", "spans": [[66, 71, "macaw"]], "length": 8, "tf": {"macaw": 1}, "contrib": {"macaw": 0.267}, "score": 0.267, "rank": 15, "gold": false}, {"id": "s0p4", "passage": "Introduction. The research community can benefit from Macaw for the following purposes:", "spans": [[54, 59, "macaw"]], "length": 9, "tf": {"macaw": 1}, "contrib": {"macaw": 0.263}, "score": 0.263, "rank": 16, "gold": false}, {"id": "s3p5", "passage": "User Interfaces. Similar to the other modules, one can easily extend Macaw using other appropriate user interfaces.", "spans": [[69, 74, "macaw"]], "length": 15, "tf": {"macaw": 1}, "contrib": {"macaw": 0.238}, "score": 0.238, "rank": 17, "gold": false}, {"id": "s2p5", "passage": "Retrieval and Question Answering in Macaw. Result Generation: The retrieved documents can be too long to be presented using some interfaces. Result generation is basically a post-processing step ran on the retrieved result list. In case of question answering, it can employ answer selection or generation techniques, such as machine reading comprehension models. For example, Macaw features the DrQA model BIBREF11 for question answering.", "spans": [[36, 41, "macaw"], [376, 381, "macaw"]], "length": 46, "tf": {"macaw": 2}, "contrib": {"macaw": 0.233}, "score": 0.233, "rank": 18, "gold": false}, {"id": "s2p6", "passage": "Retrieval and Question Answering in Macaw. These components are implemented in a generic form, so researchers can easily replace them with their own favorite algorithms.", "spans": [[36, 41, "macaw"]], "length": 17, "tf": {"macaw": 1}, "contrib": {"macaw": 0.231}, "score": 0.231, "rank": 19, "gold": false}, {"id": "s2p3", "passage": "Retrieval and Question Answering in Macaw. Query Generation: This component generates a query based on the past user-system interactions. The query generation component may take advantage of co-reference resolution for query expansion or re-writing.", "spans": [[36, 41, "macaw"]], "length": 27, "tf": {"macaw": 1}, "contrib": {"macaw": 0.2}, "score": 0.2, "rank": 20, "gold": false}, {"id": "s4p3", "passage": "Limitations and Future Work. Explanation: Despite its importance, result list explanation is also a relatively less explored topic. We intend to extend Macaw with result list explanation as soon as we find a stable and mature solution.", "spans": [[152, 157, "macaw"]], "length": 28, "tf": {"macaw": 1}, "contrib": {"macaw": 0.198}, "score": 0.198, "rank": 21, "gold": false}, {"id": "s5p0", "passage": "Contribution. Macaw is distributed under the MIT License. We welcome contributions and suggestions. Most contributions require you to agree to a Contributor License Agreement (CLA) declaring that you have the right to, and actually do, grant us the rights to use your contribution. For details, visit https://cla.opensource.microsoft.com. This project has adopted the Microsoft Open Source Code of Conduct.", "spans": [[14, 19, "macaw"]], "length": 46, "tf": {"macaw": 1}, "contrib": {"macaw": 0.16}, "score": 0.16, "rank": 22, "gold": false}, {"id": "s0p6", "passage": "Introduction. Developing algorithms, tools, and techniques for CIS.", "spans": [], "length": 6, "tf": {}, "contrib": {}, "score": 0.0, "rank": 23, "gold": false}, {"id": "s0p5", "passage": "Introduction. [leftmargin=*]", "spans": [], "length": 2, "tf": {}, "contrib": {}, "score": 0.0, "rank": 24, "gold": false}, {"id": "s7p0", "passage": "Acknowledgements. The authors wish to thank Ahmed Hassan Awadallah, Krisztian Balog, and Arjen P. de Vries for their invaluable feedback.", "spans": [], "length": 14, "tf": {}, "contrib": {}, "score": 0.0, "rank": 25, "gold": false}, {"id": "s0p7", "passage": "Introduction. Studying user interactions with CIS systems.", "spans": [], "length": 6, "tf": {}, "contrib": {}, "score": 0.0, "rank": 26, "gold": false}, {"id": "s0p8", "passage": "Introduction. Performing CIS studies based on an intermediary person and wizard of oz.", "spans": [], "length": 9, "tf": {}, "contrib": {}, "score": 0.0, "rank": 27, "gold": false}, {"id": "s0p9", "passage": "Introduction. Preparing quick demonstration for a developed CIS model.", "spans": [], "length": 7, "tf": {}, "contrib": {}, "score": 0.0, "rank": 28, "gold": false}, {"id": "s3p2", "passage": "User Interfaces. File IO: This interface is designed for experimental purposes, such as evaluating the performance of a conversational search technique on a dataset with multiple queries. This is not an interactive interface.", "spans": [], "length": 18, "tf": {}, "contrib": {}, "score": 0.0, "rank": 29, "gold": false}, {"id": "s3p3", "passage": "User Interfaces. Standard IO: This interactive command line interface is designed for development purposes to interact with the system, see the logs, and debug or improve the system.", "spans": [], "length": 18, "tf": {}, "contrib": {}, "score": 0.0, "rank": 30, "gold": false}, {"id": "s5p1", "passage": "Contribution. When you submit a pull request, a CLA bot will automatically determine whether you need to provide a CLA and decorate the PR appropriately (e.g., status check, comment). Simply follow the instructions provided by the bot. You will only need to do this once across all repos using our CLA.", "spans": [], "length": 37, "tf": {}, "contrib": {}, "score": 0.0, "rank": 31, "gold": false}, {"id": "s0p0", "passage": "Introduction. The rapid growth in speech and small screen interfaces, particularly on mobile devices, has significantly influenced the way users interact with intelligent systems to satisfy their information needs. The growing interest in personal digital assistants, such as Amazon Alexa, Apple Siri, Google Assistant, and Microsoft Cortana, demonstrates the willingness of users to employ conversational interactions BIBREF0. As a result, conversational information seeking (CIS) has been recognized as a major emerging research area in the Third Strategic Workshop on Information Retrieval (SWIRL 2018) BIBREF1.", "spans": [], "length": 61, "tf": {}, "contrib": {}, "score": 0.0, "rank": 32, "gold": false}]}, {"question": "How do they obtain psychological dimensions of people?", "words": [{"word": "How", "stem": "how", "kept": true}, {"word": "do", "stem": "do", "kept": true}, {"word": "they", "stem": "they", "kept": false}, {"word": "obtain", "stem": "obtain", "kept": true}, {"word": "psychological", "stem": "psycholog", "kept": true}, {"word": "dimensions", "stem": "dimens", "kept": true}, {"word": "of", "stem": "of", "kept": false}, {"word": "people", "stem": "peopl", "kept": true}], "paper": "Stateology: State-Level Interactive Charting of Language, Feelings, and Values", "terms": ["how", "do", "obtain", "psycholog", "dimens", "peopl"], "idf": {"how": 2.428, "do": 2.428, "obtain": 3.526, "psycholog": 1.917, "dimens": 2.428, "peopl": 0.961}, "df": {"how": 1, "do": 1, "obtain": 0, "psycholog": 2, "dimens": 1, "peopl": 6}, "n": 16, "avgdl": 61.2, "paragraphs": [{"id": "s7p0", "passage": "Conclusions. In this paper, we showed how we can effectively leverage a prodigious blog dataset. Not only does the dataset bring out the extensive linguistic content reflected in the blog posts, but also includes location information and rich metadata. These data allow for the generation of maps that reflect the demographics of the population, variations in language use, and differences in psycholinguistic and semantic categories. These mappings can be valuable to both psychologists and linguists, as well as lexicographers. A prototype demo has been made available together with the code used to collect our dataset.", "spans": [[38, 41, "how"], [474, 487, "psycholog"]], "length": 63, "tf": {"how": 1, "psycholog": 1}, "contrib": {"how": 0.959, "psycholog": 0.757}, "score": 1.716, "rank": 1, "gold": false}, {"id": "s1p0", "passage": "Data Collection. Our premise is that we can generate informative maps using geolocated information available on social media; therefore, we guide the blog collection process with the constraint that we only accept blogs that have specific location information. Moreover, we aim to find blogs belonging to writers from all 50 U.S. states, which will allow us to build U.S. maps for various dimensions of interest.", "spans": [[389, 399, "dimens"]], "length": 49, "tf": {"dimens": 1}, "contrib": {"dimens": 1.067}, "score": 1.067, "rank": 2, "gold": false}, {"id": "s8p0", "passage": "Acknowledgments. This material is based in part upon work supported by the National Science Foundation (#1344257) and by the John Templeton Foundation (#48503). Any opinions, findings, and conclusions or recommendations expressed in this material are those of the authors and do not necessarily reflect the views of the National Science Foundation or the John Templeton Foundation. We would like to thank our colleagues Hengjing Wang, Jiatao Fan, Xinghai Zhang, and Po-Jung Huang who provided technical help with the implementation of the demo.", "spans": [[276, 278, "do"]], "length": 55, "tf": {"do": 1}, "contrib": {"do": 1.018}, "score": 1.018, "rank": 3, "gold": false}, {"id": "s0p1", "passage": "Introduction. For this paper, we compiled a very large geolocated collection of blogs, written by individuals located in the U.S., with the purpose of creating insightful mappings of the blogging community. In particular, during May-July 2015, we gathered the profile information for all the users that have self-reported their location in the U.S., along with a number of posts for all their associated blogs. We utilize this blog collection to generate maps of the U.S. that reflect user demographics, language use, and distributions of psycholinguistic and semantic word classes. We believe that these maps can provide valuable insights and partial verification of previous claims in support of research in linguistic geography BIBREF1 , regional personality BIBREF2 , and language analysis BIBREF3 , BIBREF4 , as well as psychology and its relation to human geography BIBREF5 .", "spans": [[825, 835, "psycholog"]], "length": 85, "tf": {"psycholog": 1}, "contrib": {"psycholog": 0.653}, "score": 0.653, "rank": 4, "gold": false}, {"id": "s3p3", "passage": "People Maps. Another profile element that can lead to interesting maps is the Industry field BIBREF6 . Using this field, we created different maps that plot the geographical distribution of industries across the country. As an example, Figure FIGREF2 shows the percentage of the users in each state working in the automotive and tourism industries respectively.", "spans": [[0, 6, "peopl"]], "length": 37, "tf": {"peopl": 1}, "contrib": {"peopl": 0.468}, "score": 0.468, "rank": 5, "gold": false}, {"id": "s3p1", "passage": "People Maps. Figure FIGREF1 also shows the cities mentioned most often in our dataset. In particular, it illustrates all 227 cities that have at least 100 bloggers. The bigger the dot on the map, the larger the number of users found in that city. The five top blogger-dense cities, in order, are: Chicago, New York, Portland, Seattle, and Atlanta.", "spans": [[0, 6, "peopl"]], "length": 41, "tf": {"peopl": 1}, "contrib": {"peopl": 0.452}, "score": 0.452, "rank": 6, "gold": false}, {"id": "s3p2", "passage": "People Maps. We also generate two maps that delineate the gender distribution in the dataset. Overall, the blogging world seems to be dominated by females: out of 153,209 users who self-reported their gender, only 52,725 are men and 100,484 are women. Figures FIGREF1 and FIGREF1 show the percentage of male and female bloggers in each of the 50 states. As seen in this figure, there are more than the average number of male bloggers in states such as California and New York, whereas Utah and Idaho have a higher percentage of women bloggers.", "spans": [[0, 6, "peopl"]], "length": 63, "tf": {"peopl": 1}, "contrib": {"peopl": 0.38}, "score": 0.38, "rank": 7, "gold": false}, {"id": "s3p0", "passage": "People Maps. The first map we generate depicts the distribution of the bloggers in our dataset across the U.S. Figure FIGREF1 shows the density of users in our dataset in each of the 50 states. For instance, the densest state was found to be California with 11,701 users. The second densest is Texas, with 9,252 users, followed by New York, with 9,136. The state with the fewest bloggers is Delaware with 1,217 users. Not surprisingly, this distribution correlates well with the population of these states, with a Spearman's rank correlation INLINEFORM0 of 0.91 and a p-value INLINEFORM1 0.0001, and is very similar to the one reported in Lin and Halavais Lin04.", "spans": [[0, 6, "peopl"]], "length": 66, "tf": {"peopl": 1}, "contrib": {"peopl": 0.372}, "score": 0.372, "rank": 8, "gold": false}, {"id": "s4p0", "passage": "Linguistic Maps. Another use of the information found in our dataset is to build linguistic maps, which reflect the geographic lexical variation across the 50 states BIBREF7 . We generate maps that represent the relative frequency by which a word occurs in the different states. Figure FIGREF3 shows sample maps created for two different words. The figure shows the map generated for one location specific word, Maui, which unsurprisingly is found predominantly in Hawaii, and a map for a more common word, lake, which has a high occurrence rate in Minnesota (Land of 10,000 Lakes) and Utah (home of the Great Salt Lake). Our demo described in Section SECREF4 , can also be used to generate maps for function words, which can be very telling regarding people's personality BIBREF8 .", "spans": [[752, 758, "peopl"]], "length": 94, "tf": {"peopl": 1}, "contrib": {"peopl": 0.31}, "score": 0.31, "rank": 9, "gold": false}, {"id": "s5p3", "passage": "Psycholinguistic and Semantic Maps. Values. We also measure the usage of words related to people's core values as reported by Boyd et al. boyd2015. The sets of words, or themes, were excavated using the Meaning Extraction Method (MEM) BIBREF10 . MEM is a topic modeling approach applied to a corpus of texts created by hundreds of survey respondents from the U.S. who were asked to freely write about their personal values. To illustrate, Figure FIGREF9 shows the geographical distributions of two of these value themes: Religion and Hard Work. Southeastern states often considered as the nation's \u201cBible Belt\u201d BIBREF11 were found to have generally higher usage of Religion words such as God, bible, and church. Another broad trend was that western-central states (e.g., Wyoming, Nebraska, Iowa) commonly blogged about Hard Work, using words such as hard, work, and job more often than bloggers in other regions.", "spans": [[90, 96, "peopl"]], "length": 105, "tf": {"peopl": 1}, "contrib": {"peopl": 0.291}, "score": 0.291, "rank": 10, "gold": true}, {"id": "s6p0", "passage": "Web Demonstration. A prototype, interactive charting demo is available at http://lit.eecs.umich.edu/~geoliwc/. In addition to drawing maps of the geographical distributions on the different LIWC categories, the tool can report the three most and least correlated LIWC categories in the U.S. and compare the distributions of any two categories.", "spans": [], "length": 35, "tf": {}, "contrib": {}, "score": 0.0, "rank": 11, "gold": false}, {"id": "s5p1", "passage": "Psycholinguistic and Semantic Maps. LIWC. In addition to individual words, we can also create maps for word categories that reflect a certain psycholinguistic or semantic property. Several lexical resources, such as Roget or Linguistic Inquiry and Word Count BIBREF9 , group words into categories. Examples of such categories are Money, which includes words such as remuneration, dollar, and payment; or Positive feelings with words such as happy, cheerful, and celebration. Using the distribution of the individual words in a category, we can compile distributions for the entire category, and therefore generate maps for these word categories. For instance, figure FIGREF8 shows the maps created for two categories: Positive Feelings and Money. The maps are not surprising, and interestingly they also reflect an inverse correlation between Money and Positive Feelings .", "spans": [], "length": 84, "tf": {}, "contrib": {}, "score": 0.0, "rank": 12, "gold": false}, {"id": "s2p0", "passage": "Maps from Blogs. Our dataset provides mappings between location, profile information, and language use, which we can leverage to generate maps that reflect demographic, linguistic, and psycholinguistic properties of the population represented in the dataset.", "spans": [], "length": 27, "tf": {}, "contrib": {}, "score": 0.0, "rank": 13, "gold": false}, {"id": "s1p2", "passage": "Data Collection. After completing all the processing steps, we identified 197,527 bloggers with state location information. For each of these bloggers, we found their blogs (note that a blogger can have multiple blogs), for a total of 335,698 blogs. For each of these blogs, we downloaded the 21 most recent blog postings, which were cleaned of HTML tags and tokenized, resulting in a collection of 4,600,465 blog posts.", "spans": [], "length": 51, "tf": {}, "contrib": {}, "score": 0.0, "rank": 14, "gold": false}, {"id": "s1p1", "passage": "Data Collection. We first started by collecting a set of profiles of bloggers that met our location specifications by searching individual states on the profile finder on http://www.blogger.com. Starting with this list, we can locate the profile page for a user, and subsequently extract additional information, which includes fields such as name, email, occupation, industry, and so forth. It is important to note that the profile finder only identifies users that have an exact match to the location specified in the query; we thus built and ran queries that used both state abbreviations (e.g., TX, AL), as well as the states' full names (e.g., Texas, Alabama).", "spans": [], "length": 73, "tf": {}, "contrib": {}, "score": 0.0, "rank": 15, "gold": false}, {"id": "s0p0", "passage": "Introduction. Blogging gained momentum in 1999 and became especially popular after the launch of freely available, hosted platforms such as blogger.com or livejournal.com. Blogging has progressively been used by individuals to share news, ideas, and information, but it has also developed a mainstream role to the extent that it is being used by political consultants and news services as a tool for outreach and opinion forming as well as by businesses as a marketing tool to promote products and services BIBREF0 .", "spans": [], "length": 52, "tf": {}, "contrib": {}, "score": 0.0, "rank": 16, "gold": false}]}, {"question": "What was the baseline?", "words": [{"word": "What", "stem": "what", "kept": true}, {"word": "was", "stem": "was", "kept": false}, {"word": "the", "stem": "the", "kept": false}, {"word": "baseline", "stem": "baselin", "kept": true}], "paper": "Attention-based method for categorizing different types of online harassment language", "terms": ["what", "baselin"], "idf": {"what": 4.127, "baselin": 3.029}, "df": {"what": 0, "baselin": 1}, "n": 30, "avgdl": 66.0, "paragraphs": [{"id": "s9p0", "passage": "Conclusion - Future work. We present an attention-based approach for the detection of harassment language in tweets and the detection of different types of harassment as well. Our approach is based on the Recurrent Neural Networks and particularly we are using a deep, classi\ufb01cation specific attention mechanism. Moreover, we present a comparison between different variations of this attention-based approach and a few baseline methods. According to the results of our experiments and considering the F1 Score, the multi-attention method having a projected layer, achieved the highest performance. Also, we tackled the problem of the imbalance between the training, validation and test sets performing the technique of back-translation.", "spans": [[419, 427, "baselin"]], "length": 74, "tf": {"baselin": 1}, "contrib": {"baselin": 1.149}, "score": 1.149, "rank": 1, "gold": false}, {"id": "s9p1", "passage": "Conclusion - Future work. In the future, we would like to perform more experiments with this dataset applying different models using BERT BIBREF21. Also, we would like to apply the models presented in this work, in other datasets about hate speech in social media.", "spans": [], "length": 32, "tf": {}, "contrib": {}, "score": 0.0, "rank": 2, "gold": false}, {"id": "s0p1", "passage": "Introduction. Previous studies have been focused on collecting data about sexism and racism in very broad terms or have proposed two categories of sexism as benevolent or hostile sexism BIBREF0, which undermines other types of online harassment. However, there is no much study focusing on different types online harassment alone attracting natural language processing techniques.", "spans": [], "length": 43, "tf": {}, "contrib": {}, "score": 0.0, "rank": 3, "gold": false}, {"id": "s0p2", "passage": "Introduction. In this paper we present our work, which is a part of the SociaL Media And Harassment Competition of the ECML PKDD 2019 Conference. The topic of the competition is the classification of different types of harassment and it is divided in two tasks. The first one is the classification of the tweets in harassment and non-harassment categories, while the second one is the classification in specific harassment categories like indirect harassment, physical and sexual harassment as well. We are using the dataset of the competition, which includes text from tweets having the aforementioned categories. Our approach is based on the Recurrent Neural Networks and particularly we are using a deep, classi\ufb01cation specific attention mechanism. Moreover, we present a comparison between different variations of this attention-based approach like multi-attention and single attention models. The next Section includes a short description of the related work, while the third Section includes a description of the dataset. After that, we describe our methodology. Finally, we describe the experiments and we present the results and our conclusion.", "spans": [], "length": 116, "tf": {}, "contrib": {}, "score": 0.0, "rank": 4, "gold": false}, {"id": "s1p0", "passage": "Related Work. Waseem et al. BIBREF1 were the first who collected hateful tweets and categorized them into being sexist, racist or neither. However, they did not provide specific definitions for each category. Jha and Mamidi BIBREF0 focused on just sexist tweets and proposed two categories of hostile and benevolent sexism. However, these categories were general as they ignored other types of sexism happening in social media. Sharifirad S. and Matwin S. BIBREF2 proposed complimentary categories of sexist language inspired from social science work. They categorized the sexist tweets into the categories of indirect harassment, information threat, sexual harassment and physical harassment. In the next year the same authors proposed BIBREF3 a more comprehensive categorization of online harassment in social media e.g. twitter into the following categories, indirect harassment, information threat, sexual harassment, physical harassment and not sexist.", "spans": [], "length": 99, "tf": {}, "contrib": {}, "score": 0.0, "rank": 5, "gold": false}, {"id": "s1p1", "passage": "Related Work. For the detection of hate speech in social media like twitter, many approaches have been proposed. Jha and Mamidi BIBREF0 tested support vector machine, bi-directional RNN encoder-decoder and FastText on hostile and benevolent sexist tweets. They also used SentiWordNet and subjectivity lexicon on the extracted phrases to show the polarity of the tweets. Sharifirad et al. BIBREF4 trained, tested and evaluated different classification methods on the SemEval2018 dataset and chose the classifier with the highest accuracy for testing on each category of sexist tweets to know the mental state and the affectual state of the user who tweets in each category. To overcome the limitations of small data sets on sexist speech detection, Sharifirad S. et al. BIBREF5 have applied text augmentation and text generation with certain success. They have generated new tweets by replacing words in order to increase the size of our training set. Moreover, in the presented text augmentation approach, the number of tweets in each class remains the same, but their words are augmented with words extracted from their ConceptNet relations and their description extracted from Wikidata. Zhang et al. BIBREF6 combined convolutional and gated recurrent networks to detect hate speech in tweets. Others have proposed different methods, which are not based on deep learning. Burnap and Williams BIBREF7 used Support Vector Machines, Random Forests and a meta-classifier to distinguish between hateful and non-hateful messages. A survey of recent research in the field is presented in BIBREF8. For the problem of the hate speech detection a few approaches have been proposed that are based on the Attention mechanism. Pavlopoulos et al. BIBREF9 have proposed a novel, classification-specific attention mechanism that improves the performance of the RNN further for the detection of abusive content in the web. Xie et al. BIBREF10 for emotion intensity prediction, which is a similar problem to ours, have proposed a novel attention mechanism for CNN model that associates attention-based weights for every convolution window. Park and Fung BIBREF11 transformed the classi\ufb01cation into a 2-step problem, where abusive text \ufb01rst is distinguished from the non-abusive, and then the class of abuse (Sexism or Racism) is determined. However, while the first part of the two step classi\ufb01cation performs quite well, it falls short in detecting the particular class the abusive text belongs to. Pitsilis et al. BIBREF12 have proposed a detection scheme that is an ensemble of RNN classi\ufb01ers, which incorporates various features associated with user related information, such as the users\u2019 tendency towards racism or sexism", "spans": [], "length": 289, "tf": {}, "contrib": {}, "score": 0.0, "rank": 6, "gold": false}, {"id": "s2p0", "passage": "Dataset description. The dataset from Twitter that we are using in our work, consists of a train set, a validation set and a test set. It was published for the \"First workshop on categorizing different types of online harassment languages in social media\". The whole dataset is divided into two categories, which are harassment and non-harassment tweets. Moreover, considering the type of the harassment, the tweets are divided into three sub-categories which are indirect harassment, sexual and physical harassment. We can see in Table TABREF1 the class distribution of our dataset. One important issue here is that the categories of indirect and physical harassment seem to be more rare in the train set than in the validation and test sets. To tackle this issue, as we describe in the next section, we are performing data augmentation techniques. However, the dataset is imbalanced and this has a significant impact in our results.", "spans": [], "length": 97, "tf": {}, "contrib": {}, "score": 0.0, "rank": 7, "gold": false}, {"id": "s3p0", "passage": "Proposed methodology. Data augmentation. As described before one crucial issue that we are trying to tackle in this work is that the given dataset is imbalanced. Particularly, there are only a few instances from indirect and physical harassment categories respectively in the train set, while there are much more in the validation and test sets for these categories. To tackle this issue we applying a back-translation method BIBREF13, where we translate indirect and physical harassment tweets of the train set from english to german, french and greek. After that, we translate them back to english in order to achieve data augmentation. These \"noisy\" data that have been translated back, increase the number of indirect and physical harassment tweets and boost significantly the performance of our models.", "spans": [], "length": 84, "tf": {}, "contrib": {}, "score": 0.0, "rank": 8, "gold": false}, {"id": "s3p1", "passage": "Proposed methodology. Data augmentation. Another way to enrich our models is the use of pre-trained word embeddings from 2B Twitter data BIBREF14 having 27B tokens, for the initialization of the embedding layer.", "spans": [], "length": 25, "tf": {}, "contrib": {}, "score": 0.0, "rank": 9, "gold": false}, {"id": "s4p0", "passage": "Proposed methodology. Text processing. Before training our models we are processing the given tweets using a tweet pre-processor. The scope here is the cleaning and tokenization of the dataset.", "spans": [], "length": 21, "tf": {}, "contrib": {}, "score": 0.0, "rank": 10, "gold": false}, {"id": "s5p0", "passage": "Proposed methodology. RNN Model and Attention Mechanism. We are presenting an attention-based approach for the problem of the harassment detection in tweets. In this section, we describe the basic approach of our work. We are using RNN models because of their ability to deal with sequence information. The RNN model is a chain of GRU cells BIBREF15 that transforms the tokens $w_{1}, w_{2},..., w_{k}$ of each tweet to the hidden states $h_{1}, h_{2},..., h_{k}$, followed by an LR Layer that uses $h_{k}$ to classify the tweet as harassment or non-harassment (similarly for the other categories). Given the vocabulary V and a matrix E $\\in $ $R^{d \\times \\vert V \\vert }$ containing d-dimensional word embeddings, an initial $h_{0}$ and a tweet $w = <w_{1},.., w_{k}>$, the RNN computes $h_{1}, h_{2},..., h_{k}$, with $h_{t} \\in R^{m}$, as follows:", "spans": [], "length": 84, "tf": {}, "contrib": {}, "score": 0.0, "rank": 11, "gold": false}, {"id": "s5p1", "passage": "Proposed methodology. RNN Model and Attention Mechanism. where $h^{^{\\prime }}_{t} \\in R^{m}$ is the proposed hidden state at position t, obtained using the word embedding $x_{t}$ of token $w_{t}$ and the previous hidden state $h_{t-1}$, $\\odot $ represents the element-wise multiplication, $r_{t} \\in R^{m}$ is the reset gate, $z_{t} \\in R^{m}$ is the update gate, $\\sigma $ is the sigmoid function. Also $W_{h}, W_{z}, W_{r} \\in R^{m \\times d}$ and $U_{h}, U_{z}, U_{r} \\in R^{m \\times m}$, $b_{h}, b_{z}, b_{r} \\in R^{m}$. After the computation of state $h_{k}$ the LR Layer estimates the probability that tweet w should be considered as harassment, with $W_{p} \\in R^{1 \\times m}, b_{p} \\in R$:", "spans": [], "length": 64, "tf": {}, "contrib": {}, "score": 0.0, "rank": 12, "gold": false}, {"id": "s5p2", "passage": "Proposed methodology. RNN Model and Attention Mechanism. We would like to add an attention mechanism similar to the one presented in BIBREF9, so that the LR Layer will consider the weighted sum $h_{sum}$ of all the hidden states instead of $h_{k}$:", "spans": [], "length": 29, "tf": {}, "contrib": {}, "score": 0.0, "rank": 13, "gold": false}, {"id": "s5p3", "passage": "Proposed methodology. RNN Model and Attention Mechanism. $h_{sum} = \\sum _{t=1}^{k} \\alpha _{t}h_{t}$", "spans": [], "length": 11, "tf": {}, "contrib": {}, "score": 0.0, "rank": 14, "gold": false}, {"id": "s5p4", "passage": "Proposed methodology. RNN Model and Attention Mechanism. $P_{attentionRNN} = \\sigma (W_{p}h_{sum} + b_{p})$", "spans": [], "length": 13, "tf": {}, "contrib": {}, "score": 0.0, "rank": 15, "gold": false}, {"id": "s5p5", "passage": "Proposed methodology. RNN Model and Attention Mechanism. Alternatively, we could pass $h_{sum}$ through an MLP with k layers and then the LR layer will estimate the corresponding probability. More formally,", "spans": [], "length": 22, "tf": {}, "contrib": {}, "score": 0.0, "rank": 16, "gold": false}, {"id": "s5p6", "passage": "Proposed methodology. RNN Model and Attention Mechanism. $P_{attentionRNN} = \\sigma (W_{p}h_{*} + b_{p})$", "spans": [], "length": 12, "tf": {}, "contrib": {}, "score": 0.0, "rank": 17, "gold": false}, {"id": "s5p7", "passage": "Proposed methodology. RNN Model and Attention Mechanism. where $h_{*}$ is the state that comes out from the MLP. The weights $\\alpha _{t}$ are produced by an attention mechanism presented in BIBREF9 (see Fig. FIGREF7), which is an MLP with l layers. This attention mechanism differs from most previous ones BIBREF16, BIBREF17, because it is used in a classification setting, where there is no previously generated output sub-sequence to drive the attention. It assigns larger weights $\\alpha _{t}$ to hidden states $h_{t}$ corresponding to positions, where there is more evidence that the tweet should be harassment (or any other specific type of harassment) or not. In our work we are using four attention mechanisms instead of one that is presented in BIBREF9. Particularly, we are using one attention mechanism per category. Another element that differentiates our approach from Pavlopoulos et al. BIBREF9 is that we are using a projection layer for the word embeddings (see Fig. FIGREF2). In the next subsection we describe the Model Architecture of our approach.", "spans": [], "length": 113, "tf": {}, "contrib": {}, "score": 0.0, "rank": 18, "gold": false}, {"id": "s6p0", "passage": "Proposed methodology. Model Architecture. The Embedding Layer is initialized using pre-trained word embeddings of dimension 200 from Twitter data that have been described in a previous sub-section. After the Embedding Layer, we are applying a Spatial Dropout Layer, which drops a certain percentage of dimensions from each word vector in the training sample. The role of Dropout is to improve generalization performance by preventing activations from becoming strongly correlated BIBREF18. Spatial Dropout, which has been proposed in BIBREF19, is an alternative way to use dropout with convolutional neural networks as it is able to dropout entire feature maps from the convolutional layer which are then not used during pooling. After that, the word embeddings are passing through a one-layer MLP, which has tanh as activation function and 128 hidden units, in order to project them in the vector space of our problem considering that they have been pre-trained using text that has a different subject. In the next step the embeddings are fed in a unidirectional GRU having 1 Stacked Layer and size 128. We prefer GRU than LSTM, because it is more efficient computationally. Also the basic advantage of LSTM which is the ability to keep in memory large text documents, does not hold here, because tweets supposed to be not too large text documents. The output states of the GRU are passing through four self-attentions like the one described above BIBREF9, because we are using one attention per category (see Fig. FIGREF7). Finally, a one-layer MLP having 128 nodes and ReLU as activation function computes the final score for each category. At this final stage we have avoided using a softmax function to decide the harassment type considering that the tweet is a harassment, otherwise we had to train our models taking into account only the harassment tweets and this might have been a problem as the dataset is not large enough.", "spans": [], "length": 224, "tf": {}, "contrib": {}, "score": 0.0, "rank": 19, "gold": false}, {"id": "s7p0", "passage": "Experiments. Training Models. In this subsection we are giving the details of the training process of our models. Moreover, we are describing the different models that we compare in our experiments.", "spans": [], "length": 20, "tf": {}, "contrib": {}, "score": 0.0, "rank": 20, "gold": false}, {"id": "s7p1", "passage": "Experiments. Training Models. Batch size which pertains to the amount of training samples to consider at a time for updating our network weights, is set to 32, because our dataset is not large and small batches might help to generalize better. Also, we set other hyperparameters as: epochs = 20, patience = 10. As early stopping criterion we choose the average AUC, because our dataset is imbalanced.", "spans": [], "length": 48, "tf": {}, "contrib": {}, "score": 0.0, "rank": 21, "gold": false}, {"id": "s7p2", "passage": "Experiments. Training Models. The training process is based on the optimization of the loss function mentioned below and it is carried out with the Adam optimizer BIBREF20, which is known for yielding quicker convergence. We set the learning rate equal to 0.001:", "spans": [], "length": 27, "tf": {}, "contrib": {}, "score": 0.0, "rank": 22, "gold": false}, {"id": "s7p3", "passage": "Experiments. Training Models. $L = \\frac{1}{2}BCE(harassment) + \\frac{1}{2}(\\frac{1}{5}BCE(sexualH) + \\frac{2}{5}BCE(indirectH)+\\frac{2}{5}BCE(physicalH))$", "spans": [], "length": 16, "tf": {}, "contrib": {}, "score": 0.0, "rank": 23, "gold": false}, {"id": "s7p4", "passage": "Experiments. Training Models. where BCE is the binary cross-entropy loss function,", "spans": [], "length": 10, "tf": {}, "contrib": {}, "score": 0.0, "rank": 24, "gold": false}, {"id": "s7p5", "passage": "Experiments. Training Models. $BCE = -\\frac{1}{n}\\sum _{i=1}^{n}[y_{i}log(y^{^{\\prime }}_{i}) + (1 - y_{i})log(1 - y^{^{\\prime }}_{i}))]$", "spans": [], "length": 12, "tf": {}, "contrib": {}, "score": 0.0, "rank": 25, "gold": false}, {"id": "s7p6", "passage": "Experiments. Training Models. $i$ denotes the $i$th training sample, $y$ is the binary representation of true harassment label, and $y^{^{\\prime }}$ is the predicted probability. In the loss function we have applied equal weight to both tasks. However, in the second task (type of harassment classification) we have applied higher weight in the categories that it is harder to predict due to the problem of the class imbalance between the training, validation and test sets respectively.", "spans": [], "length": 48, "tf": {}, "contrib": {}, "score": 0.0, "rank": 26, "gold": false}, {"id": "s8p0", "passage": "Experiments. Evaluation and Results. Each model produces four scores and each score is the probability that a tweet includes harassment language, indirect, physical and sexual harassment language respectively. For any tweet, we first check the score of the harassment language and if it is less than a specified threshold, then the harassment label is zero, so the other three labels are zero as well. If it is greater than or equal to that threshold, then the harassment label is one and the type of harassment is the one among these three having that has the greatest score (highest probability). We set this threshold equal to 0.33.", "spans": [], "length": 65, "tf": {}, "contrib": {}, "score": 0.0, "rank": 27, "gold": false}, {"id": "s8p1", "passage": "Experiments. Evaluation and Results. We compare eight different models in our experiments. Four of them have a Projected Layer (see Fig. FIGREF2), while the others do not have, and this is the only difference between these two groups of our models. So, we actually include four models in our experiments (having a projected layer or not). Firstly, LastStateRNN is the classic RNN model, where the last state passes through an MLP and then the LR Layer estimates the corresponding probability. In contrast, in the AvgRNN model we consider the average vector of all states that come out of the cells. The AttentionRNN model is the one that it has been presented in BIBREF9. Moreover, we introduce the MultiAttentionRNN model for the harassment language detection, which instead of one attention, it includes four attentions, one for each category.", "spans": [], "length": 93, "tf": {}, "contrib": {}, "score": 0.0, "rank": 28, "gold": true}, {"id": "s8p2", "passage": "Experiments. Evaluation and Results. We have evaluated our models considering the F1 Score, which is the harmonic mean of precision and recall. We have run ten times the experiment for each model and considered the average F1 Score. The results are mentioned in Table TABREF11. Considering F1 Macro the models that include the multi-attention mechanism outperform the others and particularly the one with the Projected Layer has the highest performance. In three out of four pairs of models, the ones with the Projected Layer achieved better performance, so in most cases the addition of the Projected Layer had a significant enhancement.", "spans": [], "length": 69, "tf": {}, "contrib": {}, "score": 0.0, "rank": 29, "gold": false}, {"id": "s0p0", "passage": "Introduction. In the era of social media and networking platforms, Twitter has been doomed for abuse and harassment toward users specifically women. In fact, online harassment becomes very common in Twitter and there have been a lot of critics that Twitter has become the platform for many racists, misogynists and hate groups which can express themselves openly. Online harassment is usually in the form of verbal or graphical formats and is considered harassment, because it is neither invited nor has the consent of the receipt. Monitoring the contents including sexism and sexual harassment in traditional media is easier than monitoring on the online social media platforms like Twitter. The main reason is because of the large amount of user generated content in these media. So, the research about the automated detection of content containing sexual harassment is an important issue and could be the basis for removing that content or flagging it for human evaluation. The basic goal of this automatic classification is that it will significantly improve the process of detecting these types of hate speech on social media by reducing the time and effort required by human beings.", "spans": [], "length": 120, "tf": {}, "contrib": {}, "score": 0.0, "rank": 30, "gold": false}]}], "recall": [{"k": 1, "questions": 759, "median_chars": 541, "recall": 0.20385356232038154, "all_found": 0.17523056653491437, "random_recall": 0.033824832053834034, "random_all_found": 0.02440711462450593}, {"k": 3, "questions": 759, "median_chars": 1800, "recall": 0.4349728625472333, "all_found": 0.3794466403162055, "random_recall": 0.09926228237279829, "random_all_found": 0.07257575757575757}, {"k": 5, "questions": 759, "median_chars": 3098, "recall": 0.576913799300423, "all_found": 0.5164690382081687, "random_recall": 0.16383401263894554, "random_all_found": 0.12247035573122529}, {"k": 10, "questions": 759, "median_chars": 6240, "recall": 0.7644293390080783, "all_found": 0.6956521739130435, "random_recall": 0.3168495319588647, "random_all_found": 0.2511989459815547}, {"k": 20, "questions": 759, "median_chars": 11672, "recall": 0.8996305216868978, "all_found": 0.852437417654809, "random_recall": 0.5792653203706355, "random_all_found": 0.4986034255599473}]};
+const TAKEAWAYS = [
+  "The gold paragraph ranks first, but only just: 1.46 against 1.29. “modal” and “support” give most of its points: 1.17 of 1.46. “Macaw” is the paper's own system name. It is in 21 of 32 paragraphs, so its weight is low.",
+  "The gold paragraph ranks 10th. It shares only “people” with the question, a weak word in this paper. The question words “how” and “do” are not on the library's short stopword list, and here they lift wrong paragraphs. Across all 759 questions, a longer stopword list changed recall by less than 1 point.",
+  "The gold paragraph says “we compare eight different models”. It never says “baseline”, so it scores 0. So do 28 of the other 29 paragraphs. Their order is arbitrary, so its rank of 28th is chance. BM25 matches words, not meaning. A search model that understands meaning could find this paragraph."
+];
+const TAB_NAMES = ["1. Found first", "2. Found 10th", "3. Missed"];
+const colors = ["--s1", "--s2", "--s3", "--s4", "--s5", "--s6"];
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const el = (tag, attrs = {}, text) => {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+  if (text !== undefined) n.textContent = text;
+  return n;
+};
+const tip = document.getElementById("tip");
+function showTip(evt, rows) {
+  tip.replaceChildren(...rows.map(([value, label, color]) => {
+    const r = el("div", { class: "tiprow" });
+    if (color) { const i = el("i"); i.style.background = color; r.append(i); }
+    r.append(el("b", {}, value), document.createTextNode(" " + label));
+    return r;
+  }));
+  tip.style.display = "block";
+  const x = Math.min(evt.clientX + 14, window.innerWidth - tip.offsetWidth - 8);
+  tip.style.left = x + "px"; tip.style.top = (evt.clientY + 14) + "px";
+}
+const hideTip = () => { tip.style.display = "none"; };
+
+let current = 0, open = null;
+const kInput = document.getElementById("k");
+
+function renderExample() {
+  const ex = DATA.examples[current];
+  const termColor = (t) => `var(${colors[ex.terms.indexOf(t) % colors.length]})`;
+  document.getElementById("qtext").textContent = "“" + ex.question + "”";
+  document.getElementById("qpaper").textContent = `Paper: ${ex.paper} · ${ex.n} paragraphs`;
+
+  const stemmed = ex.words.find((w) => w.kept && w.stem !== w.word.toLowerCase());
+  document.getElementById("stem-note").textContent = "BM25 drops very common words (stopwords). It also cuts each word to " +
+    "its stem, so other forms of a word match" + (stemmed ? `: “${stemmed.word}” becomes “${stemmed.stem}”.` : ".");
+
+  const words = document.getElementById("words"); words.replaceChildren();
+  for (const w of ex.words) {
+    const chip = el("span", { class: "chip" + (w.kept ? "" : " dropped") });
+    if (w.kept) {
+      const key = el("span", { class: "key" }); key.style.background = termColor(w.stem); chip.append(key);
+      chip.append(document.createTextNode(w.word), el("small", {}, "→ " + w.stem));
+    } else { chip.append(document.createTextNode(w.word)); chip.title = "stopword, dropped"; }
+    words.append(chip);
+  }
+
+  const idf = document.getElementById("idf"); idf.replaceChildren();
+  const head = el("tr");
+  for (const [h, num] of [["Word", 0], ["Paragraphs that contain it", 1], ["Weight (IDF)", 1]]) head.append(el("th", num ? { class: "num" } : {}, h));
+  idf.append(head);
+  for (const t of ex.terms) {
+    const tr = el("tr"), name = el("td"), key = el("span", { class: "key" });
+    key.style.cssText = `display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:8px;background:${termColor(t)}`;
+    name.append(key, document.createTextNode(t));
+    const found = ex.df[t] ? `${ex.df[t]} of ${ex.n}` : `0 of ${ex.n}: adds no points`;
+    tr.append(name, el("td", { class: "num" }, found), el("td", { class: "num" }, ex.idf[t].toFixed(2)));
+    idf.append(tr);
+  }
+
+  const legend = document.getElementById("legend"); legend.replaceChildren();
+  for (const t of ex.terms) {
+    const chip = el("span", { class: "chip" }), key = el("span", { class: "key" });
+    key.style.background = termColor(t); chip.append(key, document.createTextNode(t)); legend.append(chip);
+  }
+  document.getElementById("takeaway").textContent = TAKEAWAYS[current];
+  renderRows();
+}
+
+function renderRows() {
+  const ex = DATA.examples[current], k = +kInput.value, top = Math.min(k, ex.n);
+  const termColor = (t) => `var(${colors[ex.terms.indexOf(t) % colors.length]})`;
+  document.getElementById("kval").textContent = k;
+  const shown = ex.paragraphs.filter((r) => r.rank <= 20 || r.gold);
+  const max = Math.max(...shown.map((r) => r.score), 1e-9);
+  const rows = document.getElementById("rows"); rows.replaceChildren();
+  const gap = (from, to) => {
+    const skipped = ex.paragraphs.filter((q) => q.rank >= from && q.rank <= to);
+    if (!skipped.length) return;
+    const zero = skipped.every((q) => q.score === 0) ? ", all scoring 0" : "";
+    rows.append(el("div", { class: "gap" }, `${skipped.length} more paragraph${skipped.length === 1 ? "" : "s"}${zero}`));
+  };
+  const cut = top === ex.n ? `All ${ex.n} paragraphs above this line go to the model`
+    : top === 1 ? "The top paragraph above this line goes to the model"
+    : `The top ${top} paragraphs above this line go to the model`;
+  let prev = 0;
+  for (const r of shown) {
+    gap(prev + 1, r.rank - 1);
+    prev = r.rank;
+    const row = el("div", { class: "row" + (r.rank > top ? " out" : ""), tabindex: "0", role: "button",
+                            "aria-expanded": String(open === r.id), "data-id": r.id });
+    const label = el("div", { class: "label" });
+    if (r.gold) label.append(el("span", { class: "gold" }, "Gold evidence"));
+    label.append(document.createTextNode(plain(r.passage).slice(0, 300)));
+    const bar = el("div", { class: "bar" });
+    for (const t of ex.terms) {
+      const c = r.contrib[t]; if (!c) continue;
+      const seg = el("span"); seg.style.width = (c / max * 100) + "%"; seg.style.background = termColor(t);
+      seg.addEventListener("pointermove", (e) => showTip(e, [[c.toFixed(3), `points from “${t}”`, termColor(t)]]));
+      seg.addEventListener("pointerleave", hideTip);
+      bar.append(seg);
+    }
+    const mid = el("div"); mid.append(label, bar);
+    row.append(el("div", { class: "rank" }, "#" + r.rank), mid, el("div", { class: "score" }, r.score.toFixed(2)));
+    const toggle = () => { open = open === r.id ? null : r.id; renderRows(); rows.querySelector(`[data-id="${r.id}"]`).focus(); };
+    row.addEventListener("click", toggle);
+    row.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
+    rows.append(row);
+    if (open === r.id) rows.append(detail(ex, r, termColor));
+    if (r.rank === top) rows.append(el("div", { class: "cut" }, cut));
+  }
+  gap(prev + 1, ex.n);
+}
+
+// Row labels only: the detail view keeps the raw text, because the highlight offsets point into it.
+const REFS = { BIB: "[ref]", FIG: "[figure]", TAB: "[table]", SEC: "[section]" };
+const plain = (s) => s.replace(/\$[^$]*\$/g, "[math]").replace(/\bINLINEFORM\d+\b/g, "[math]")
+  .replace(/\b(BIB|FIG|TAB|SEC)REF\d+\b/g, (m, t) => REFS[t]);
+
+function detail(ex, r, termColor) {
+  const box = el("div", { class: "detail" }), p = el("p");
+  let at = 0;
+  for (const [a, b, stem] of r.spans) {
+    p.append(document.createTextNode(r.passage.slice(at, a)));
+    const m = el("mark", {}, r.passage.slice(a, b));
+    m.style.background = `color-mix(in srgb, ${termColor(stem)} 28%, transparent)`;
+    p.append(m); at = b;
+  }
+  p.append(document.createTextNode(r.passage.slice(at)));
+  box.append(p);
+  const t = el("table"), head = el("tr");
+  for (const h of ["Word", "Times here", "Weight", "Points"]) head.append(el("th", h === "Word" ? {} : { class: "num" }, h));
+  t.append(head);
+  for (const w of ex.terms) {
+    const tr = el("tr");
+    tr.append(el("td", {}, w), el("td", { class: "num" }, String(r.tf[w] || 0)), el("td", { class: "num" }, ex.idf[w].toFixed(2)),
+              el("td", { class: "num" }, (r.contrib[w] || 0).toFixed(3)));
+    t.append(tr);
+  }
+  const total = el("tr"); total.append(el("th", {}, "Total"), el("td"), el("td"), el("th", { class: "num" }, r.score.toFixed(3)));
+  t.append(total);
+  box.append(t, el("p", { style: "color:var(--muted);font-size:13px" },
+    `This paragraph has ${r.length} words after cleaning; the paper's average is ${ex.avgdl}.`));
+  return box;
+}
+
+const tabs = document.getElementById("tabs");
+TAB_NAMES.forEach((name, i) => {
+  const b = el("button", { "aria-pressed": String(i === 0) }, name);
+  b.addEventListener("click", () => {
+    current = i; open = null;
+    [...tabs.children].forEach((c, j) => c.setAttribute("aria-pressed", String(j === i)));
+    renderExample();
+  });
+  tabs.append(b);
+});
+kInput.addEventListener("input", renderRows);
+
+// Recall@k chart: one axis, BM25 vs. random, crosshair tooltip.
+let metric = "recall";
+const METRICS = { recall: "Recall", all_found: "All evidence found" };
+const metricSeg = document.getElementById("metric");
+for (const [key, name] of Object.entries(METRICS)) {
+  const b = el("button", { "aria-pressed": String(key === metric) }, name);
+  b.addEventListener("click", () => {
+    metric = key; [...metricSeg.children].forEach((c) => c.setAttribute("aria-pressed", String(c === b))); renderChart();
+  });
+  metricSeg.append(b);
+}
+function renderChart() {
+  const svg = document.getElementById("chart"), NS = "http://www.w3.org/2000/svg";
+  const W = 640, H = 300, L = 44, R = 110, T = 16, Bm = 36;
+  const ks = DATA.recall.map((r) => r.k);
+  const x = (k) => L + (k - 1) / (20 - 1) * (W - L - R), y = (v) => T + (1 - v) * (H - T - Bm);
+  const s = (tag, attrs, text) => {
+    const n = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    if (text !== undefined) n.textContent = text;
+    return n;
+  };
+  svg.replaceChildren(s("title", { id: "chart-title" }, `${METRICS[metric]} at k, BM25 vs random paragraphs`));
+  const end = DATA.recall[DATA.recall.length - 1], pct = (v) => Math.round(v * 100) + "%";
+  document.getElementById("metric-def").textContent = metric === "recall"
+    ? "Recall is the share of the gold evidence paragraphs that are in the top k."
+    : "All evidence found is the share of questions where the top k holds every gold evidence paragraph.";
+  document.getElementById("chart-caption").textContent = metric === "recall"
+    ? `At k = 20 the search finds ${pct(end.recall)} of the gold evidence, against ${pct(end.random_recall)} for random paragraphs.`
+    : `At k = 20 the search finds all the gold evidence for ${pct(end.all_found)} of questions, against ` +
+      `${pct(end.random_all_found)} for random paragraphs.`;
+  for (const v of [0, 0.25, 0.5, 0.75, 1]) {
+    svg.append(s("line", { x1: L, x2: W - R, y1: y(v), y2: y(v), stroke: v === 0 ? css("--axis") : css("--grid"), "stroke-width": 1 }));
+    svg.append(s("text", { x: L - 8, y: y(v) + 4, "text-anchor": "end" }, Math.round(v * 100) + "%"));
+  }
+  for (const k of ks) svg.append(s("text", { x: x(k), y: H - Bm + 18, "text-anchor": "middle" }, "k=" + k));
+  const series = [
+    { name: "BM25", key: metric, color: css("--s1") },
+    { name: "Random", key: "random_" + metric, color: css("--ref") },
+  ];
+  const legend = document.getElementById("chart-legend"); legend.replaceChildren();
+  for (const ser of series) {
+    const chip = el("span", { class: "chip" }), key = el("span");
+    key.style.cssText = `width:14px;height:2px;background:${ser.color};display:inline-block`;
+    chip.append(key, document.createTextNode(ser.name === "Random" ? "Random paragraphs" : "BM25 top k")); legend.append(chip);
+  }
+  for (const ser of series) {
+    const pts = DATA.recall.map((r) => [x(r.k), y(r[ser.key])]);
+    svg.append(s("polyline", { points: pts.map((p) => p.join(",")).join(" "), fill: "none", stroke: ser.color,
+                               "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
+    for (const [px, py] of pts) svg.append(s("circle", { cx: px, cy: py, r: 4, fill: ser.color, stroke: css("--surface"), "stroke-width": 2 }));
+    const last = DATA.recall[DATA.recall.length - 1];
+    svg.append(s("text", { x: x(20) + 10, y: y(last[ser.key]) + 4, style: "fill:var(--ink-2)" },
+                 `${ser.name} ${Math.round(last[ser.key] * 100)}%`));
+  }
+  const cross = s("line", { y1: T, y2: H - Bm, stroke: css("--axis"), "stroke-width": 1, visibility: "hidden" });
+  svg.append(cross);
+  const hit = s("rect", { x: L, y: T, width: W - L - R, height: H - T - Bm, fill: "transparent" });
+  hit.addEventListener("pointermove", (e) => {
+    const box = svg.getBoundingClientRect(), px = (e.clientX - box.left) / box.width * W;
+    const row = DATA.recall.reduce((a, b) => (Math.abs(x(b.k) - px) < Math.abs(x(a.k) - px) ? b : a));
+    cross.setAttribute("x1", x(row.k)); cross.setAttribute("x2", x(row.k)); cross.setAttribute("visibility", "visible");
+    showTip(e, [[`k = ${row.k}`, ""], ...series.map((ser) => [Math.round(row[ser.key] * 100) + "%", ser.name, ser.color])]);
+  });
+  hit.addEventListener("pointerleave", () => { cross.setAttribute("visibility", "hidden"); hideTip(); });
+  svg.append(hit);
+
+  const table = document.getElementById("table"); table.replaceChildren();
+  const head = el("tr");
+  for (const h of ["k", "Recall", "All found", "Random recall", "Random all found", "Context (median chars)"]) head.append(el("th", { class: "num" }, h));
+  table.append(head);
+  for (const r of DATA.recall) {
+    const tr = el("tr");
+    for (const v of [r.k, pct(r.recall), pct(r.all_found), pct(r.random_recall), pct(r.random_all_found),
+                     r.median_chars.toLocaleString("en-US")]) tr.append(el("td", { class: "num" }, String(v)));
+    table.append(tr);
+  }
+}
+const start = +(new URLSearchParams(location.hash.slice(1)).get("ex") || 1) - 1;
+if (start > 0 && start < DATA.examples.length) tabs.children[start].click(); else renderExample();
+renderChart();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", renderChart);
+</script>
+</body>
+</html>
